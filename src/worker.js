@@ -64,47 +64,154 @@ async function gigalixirRequest(env, method, path, body = null) {
 
 // ── TURSO DATABASE LAYER ─────────────────────────────────────────────────────
 
-async function executeTursoQueries(env, statements) {
-  const dbUrl = env.TURSO_DB_URL;
-  const dbToken = env.TURSO_AUTH_TOKEN;
-  if (!dbUrl) {
-    throw new Error('TURSO_DB_URL is not configured in the environment');
-  }
-
-  const url = `${dbUrl}/v2/pipeline`.replace('libsql://', 'https://');
-  
-  // Convert standard statement format to libSQL request format
-  const requests = statements.map(st => ({
-    type: 'execute',
-    stmt: {
-      sql: st.sql,
-      args: (st.args || []).map(arg => {
-        if (arg === null) return { type: 'null' };
-        if (typeof arg === 'number') return { type: 'integer', value: String(arg) };
-        if (typeof arg === 'boolean') return { type: 'integer', value: arg ? '1' : '0' };
-        return { type: 'text', value: String(arg) };
-      })
+function parseLibSQLUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  if (rawUrl.includes('auth_token=')) {
+    try {
+      const urlObj = new URL(rawUrl.replace('libsql://', 'https://'));
+      const tokenParam = urlObj.searchParams.get('auth_token');
+      if (tokenParam) {
+        urlObj.searchParams.delete('auth_token');
+        return {
+          dbUrl: urlObj.toString(),
+          dbToken: tokenParam
+        };
+      }
+    } catch (e) {
+      // ignore
     }
-  }));
+  }
+  return {
+    dbUrl: rawUrl.replace('libsql://', 'https://'),
+    dbToken: ''
+  };
+}
 
-  // Append closing request to pipeline
-  requests.push({ type: 'close' });
+async function resolveTursoCredentials(env) {
+  // 1. Try environment variables
+  let dbUrl = env.TURSO_DB_URL || env.DATABASE_URL;
+  let dbToken = env.TURSO_AUTH_TOKEN;
 
-  const res = await fetchWithTimeout(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${dbToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ requests }),
-  }, 10000);
-
-  if (!res.ok) {
-    throw new Error(`Turso HTTP Error (${res.status}): ${await res.text()}`);
+  // If dbUrl has a query param containing the token, parse it
+  if (dbUrl && dbUrl.includes('auth_token=')) {
+    const parsed = parseLibSQLUrl(dbUrl);
+    if (parsed) {
+      dbUrl = parsed.dbUrl;
+      dbToken = parsed.dbToken;
+    }
   }
 
-  const data = await res.json();
-  return data;
+  // 2. Fetch from Gigalixir config if missing or we suspect it's stale
+  if (!dbUrl || !dbToken) {
+    try {
+      const appsList = await gigalixirRequest(env, 'GET', '/api/apps');
+      const apps = appsList?.data ?? appsList ?? [];
+      if (Array.isArray(apps) && apps.length > 0) {
+        const activeApp = apps.find(a => a.state === 'ACTIVE') || apps[0];
+        const appName = activeApp?.unique_name;
+        if (appName) {
+          let configRes;
+          try {
+            configRes = await gigalixirRequest(env, 'GET', `/api/apps/${appName}/config`);
+          } catch {
+            configRes = await gigalixirRequest(env, 'GET', `/api/apps/${appName}/configs`);
+          }
+          const configData = configRes?.data ?? configRes ?? {};
+          const lookupUrl = configData.DATABASE_URL || configData.database_url;
+          if (lookupUrl) {
+            const parsed = parseLibSQLUrl(lookupUrl);
+            if (parsed) {
+              return parsed;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  return {
+    dbUrl: dbUrl || '',
+    dbToken: dbToken || ''
+  };
+}
+
+async function executeTursoQueries(env, statements) {
+  let { dbUrl, dbToken } = await resolveTursoCredentials(env);
+
+  const runQuery = async (url, token) => {
+    if (!url) {
+      throw new Error('TURSO_DB_URL is not configured and could not be resolved from Gigalixir');
+    }
+    const cleanUrl = url.replace('libsql://', 'https://');
+    const targetUrl = cleanUrl.endsWith('/') ? `${cleanUrl}v2/pipeline` : `${cleanUrl}/v2/pipeline`;
+    
+    const requests = statements.map(st => ({
+      type: 'execute',
+      stmt: {
+        sql: st.sql,
+        args: (st.args || []).map(arg => {
+          if (arg === null) return { type: 'null' };
+          if (typeof arg === 'number') return { type: 'integer', value: String(arg) };
+          if (typeof arg === 'boolean') return { type: 'integer', value: arg ? '1' : '0' };
+          return { type: 'text', value: String(arg) };
+        })
+      }
+    }));
+    requests.push({ type: 'close' });
+
+    const res = await fetchWithTimeout(targetUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ requests }),
+    }, 10000);
+
+    if (!res.ok) {
+      const errText = await res.text();
+      const errObj = { status: res.status, message: `Turso HTTP Error (${res.status}): ${errText}` };
+      throw errObj;
+    }
+
+    return res.json();
+  };
+
+  try {
+    return await runQuery(dbUrl, dbToken);
+  } catch (firstErr) {
+    if (firstErr && (firstErr.status === 401 || firstErr.message?.includes('401') || !dbUrl || !dbToken)) {
+      try {
+        const appsList = await gigalixirRequest(env, 'GET', '/api/apps');
+        const apps = appsList?.data ?? appsList ?? [];
+        if (Array.isArray(apps) && apps.length > 0) {
+          const activeApp = apps.find(a => a.state === 'ACTIVE') || apps[0];
+          const appName = activeApp?.unique_name;
+          if (appName) {
+            let configRes;
+            try {
+              configRes = await gigalixirRequest(env, 'GET', `/api/apps/${appName}/config`);
+            } catch {
+              configRes = await gigalixirRequest(env, 'GET', `/api/apps/${appName}/configs`);
+            }
+            const configData = configRes?.data ?? configRes ?? {};
+            const lookupUrl = configData.DATABASE_URL || configData.database_url;
+            if (lookupUrl) {
+              const parsed = parseLibSQLUrl(lookupUrl);
+              if (parsed && parsed.dbUrl && parsed.dbToken) {
+                return await runQuery(parsed.dbUrl, parsed.dbToken);
+              }
+            }
+          }
+        }
+      } catch (selfHealErr) {
+        // ignore fallback errors
+      }
+    }
+    throw new Error(firstErr.message || String(firstErr));
+  }
 }
 
 // Execute single Turso statement helper
