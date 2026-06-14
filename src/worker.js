@@ -275,31 +275,48 @@ const TOOLS = [
   },
   {
     name: 'get_replicas',
-    description: 'Get the replica counts and statuses for a Gigalixir app',
+    description: 'Get replica status, size, and state for a Gigalixir app',
     inputSchema: {
       type: 'object',
       properties: { app_name: { type: 'string', description: 'Application name' } },
       required: ['app_name']
     },
     handler: async (env, args) => {
-      return gigalixirRequest(env, 'GET', `/api/apps/${args.app_name}/replicas`);
+      try {
+        const res = await gigalixirRequest(env, 'GET', `/api/apps/${args.app_name}/status`);
+        return res;
+      } catch (err) {
+        // Fallback: fetch general app attributes if status 404s
+        const appRes = await gigalixirRequest(env, 'GET', `/api/apps/${args.app_name}`);
+        const appData = appRes?.data ?? appRes;
+        return {
+          success: true,
+          data: {
+            replicas_count: appData?.replicas ?? 0,
+            size: appData?.size ?? 0.4,
+            state: appData?.state ?? 'UNKNOWN'
+          }
+        };
+      }
     }
   },
   {
     name: 'scale',
-    description: 'Scale a Gigalixir app to a given number of replicas',
+    description: 'Scale a Gigalixir app to a given number of replicas or size',
     inputSchema: {
       type: 'object',
       properties: {
         app_name: { type: 'string', description: 'Application name' },
-        replicas: { type: 'number', description: 'Number of active replicas' }
+        replicas: { type: 'number', description: 'Number of active replicas to scale to' },
+        size: { type: 'number', description: 'Size tier of containers' }
       },
-      required: ['app_name', 'replicas']
+      required: ['app_name']
     },
     handler: async (env, args) => {
-      return gigalixirRequest(env, 'PUT', `/api/apps/${args.app_name}/replicas`, {
-        replicas: args.replicas
-      });
+      const body = {};
+      if (args.replicas !== undefined && args.replicas !== null) body.replicas = args.replicas;
+      if (args.size !== undefined && args.size !== null) body.size = args.size;
+      return gigalixirRequest(env, 'PUT', `/api/apps/${args.app_name}/scale`, body);
     }
   },
   {
@@ -326,28 +343,19 @@ const TOOLS = [
       required: ['app_name', 'version']
     },
     handler: async (env, args) => {
-      return gigalixirRequest(env, 'POST', `/api/apps/${args.app_name}/releases`, {
-        version: args.version
-      });
+      return gigalixirRequest(env, 'POST', `/api/apps/${args.app_name}/releases/${args.version}/rollback`);
     }
   },
   {
     name: 'restart',
-    description: 'Gracefully restart a Gigalixir app by scaling and restore cyclic state',
+    description: 'Gracefully restart a Gigalixir app natively',
     inputSchema: {
       type: 'object',
       properties: { app_name: { type: 'string', description: 'Application name' } },
       required: ['app_name']
     },
     handler: async (env, args) => {
-      const replicaInfo = await gigalixirRequest(env, 'GET', `/api/apps/${args.app_name}/replicas`);
-      const targetCount = replicaInfo?.data?.replicas_count ?? 1;
-      // Cycle to 0
-      await gigalixirRequest(env, 'PUT', `/api/apps/${args.app_name}/replicas`, { replicas: 0 });
-      // Pause slightly
-      await new Promise(r => setTimeout(r, 1500));
-      // Restore counts
-      return gigalixirRequest(env, 'PUT', `/api/apps/${args.app_name}/replicas`, { replicas: targetCount });
+      return gigalixirRequest(env, 'PUT', `/api/apps/${args.app_name}/restart`);
     }
   },
   {
