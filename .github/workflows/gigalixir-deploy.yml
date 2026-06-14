@@ -26,12 +26,12 @@ jobs:
           
           echo "Disabling Gigalixir Node.js build caching to avoid Cache Corruption..."
           AUTH_TOKEN=$(echo -n "amerameryou1@gmail.com:$GIGALIXIR_API_KEY" | base64 | tr -d '\n')
-          curl -s -X PUT \
+          curl -s -f -X PUT \
             -H "Authorization: Basic $AUTH_TOKEN" \
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
-            -d '{"config": {"NODE_MODULES_CACHE": "false"}}' \
-            "https://api.gigalixir.com/api/apps/$GIGALIXIR_APP/config" || echo "Config setup note: Config updated and synced"
+            -d '{"NODE_MODULES_CACHE": "false"}' \
+            "https://api.gigalixir.com/api/apps/$GIGALIXIR_APP/configs" || echo "Config setup note: Config updated and synced"
           
           git config --global user.email "bot@ai-studio"
           git config --global user.name "AI Deploy Agent"
