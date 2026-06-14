@@ -1,0 +1,6 @@
+{
+  "name": "Gigalixir MCP Server",
+  "description": "A high-performance Gigalixir and Turso/GitHub Model Context Protocol (MCP) server running on Next.js Route Handlers",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
