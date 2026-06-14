@@ -76,3 +76,29 @@ npx wrangler deploy
 * `github_list_files` & `github_get_file` — Recurse, tree-walk, or read raw contents.
 * `github_create_file` & `github_update_file` & `github_delete_file` — Create, update, or delete files securely with auto-resolved folder tree SHAs.
 * `github_create_pr` — Generate pull requests between head and base branch tracks.
+
+---
+
+## 🛡️ Production-Grade AI DevOps & Safety Controls (New)
+
+The MCP server incorporates advanced guardrails, observability, and orchestration layers to transition from a collection of raw tools to a safe, self-healing **AI DevOps Agent** system:
+
+### ⚙️ 1. Safety Guardrails & Access Rules
+All state-changing operations are monitored by a local guardrail layer. Accidental or destructive acts are blocked unless explicit permission bypass is granted:
+* **Outage Prevention**: Scaling active deployment replicas pool size to `0` is blocked by default.
+* **Secret Deletion Protection**: Deleting configurations containing database strings, credentials, tokens, URLs, or security secrets is locked.
+* **Database Guardrails**: Destructive SQL commands (e.g., `DROP TABLE`, `TRUNCATE`) are blocked on custom executes.
+* **Version Control Lock**: Accidentally deleting core files from git via `github_delete_file` is locked.
+* **How to Bypass**: If you explicitly intend to execute a locked operation, pass the parameter `"bypass_safety": true` in the tool call.
+
+### 🧪 2. Universal Dry-Run Simulator
+Before executing any state-altering operations (scaling, deleting configs, commits, rollbacks, SQL mutations), pass `"dry_run": true` to preview the actions. The tool will return a detailed simulation explanation and log the trace without changing any remote resources.
+
+### 📊 3. Real-Time Observability & Auditing
+* `audit_traces_list` — Retrieve real-time tracking logs of all executed actions, including timestamps, durations, statuses, targets, parameters (with sanitised pay-loads), and errors. Perfect for auditing AI operator behaviors.
+* `get_system_safety_policies` — Standard endpoint to query current safety postures, rule sets, limits, and dry-run instructions.
+
+### 🚂 4. Core Orchestration Pipelines & Workflows
+* `orchestrate_deploy_pipeline` — Performs complete end-to-end git-to-cloud deployments (verifies packages on GitHub, sets Gigalixir environments, triggers rolling restarts, and parses container health logs).
+* `diagnose_and_repair_app` — Scans application runtimes, scales, and retrieves trailing log traces; detects crash loops or replicas drifts, and triggers self-healing cycles (e.g., scale recovery, graceful process recycles).
+
