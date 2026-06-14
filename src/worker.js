@@ -50,6 +50,31 @@ async function turso(env, sql, args = []) {
   return { cols, rows, affected: result.affected_row_count ?? 0 };
 }
 
+// ── GitHub REST API ──────────────────────────────────────────────────────────
+
+async function github(env, method, path, body) {
+  const res = await fetch(`https://api.github.com${path}`, {
+    method,
+    headers: {
+      'Authorization': `Bearer ${env.GITHUB_TOKEN}`,
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'gigalixir-mcp-worker',
+      'Content-Type': 'application/json',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 204) return { success: true };
+  const text = await res.text();
+  try { return JSON.parse(text); } catch { return { raw: text }; }
+}
+
+// Get file SHA (required for update/delete)
+async function getFileSha(env, owner, repo, path, branch = 'main') {
+  const data = await github(env, 'GET', `/repos/${owner}/${repo}/contents/${path}?ref=${branch}`);
+  return data?.sha ?? null;
+}
+
 const TOOLS = [
   {
     name: 'list_apps',
@@ -216,6 +241,214 @@ const TOOLS = [
       },
       required: ['table']
     }
+  },
+
+  // ── GitHub tools ─────────────────────────────────────────────────────────────
+  {
+    name: 'github_list_repos',
+    description: 'List all repositories for the authenticated GitHub user',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        type: { type: 'string', description: 'Filter: all, owner, public, private, member (default: all)' }
+      }
+    }
+  },
+  {
+    name: 'github_get_repo',
+    description: 'Get details about a specific GitHub repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'Repo owner username' },
+        repo: { type: 'string', description: 'Repository name' }
+      },
+      required: ['owner', 'repo']
+    }
+  },
+  {
+    name: 'github_create_repo',
+    description: 'Create a new GitHub repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Repository name' },
+        description: { type: 'string', description: 'Repository description' },
+        private: { type: 'boolean', description: 'Make repo private (default: false)' },
+        auto_init: { type: 'boolean', description: 'Initialize with README (default: true)' }
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'github_list_files',
+    description: 'List files and folders in a directory of a GitHub repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'Repo owner username' },
+        repo: { type: 'string', description: 'Repository name' },
+        path: { type: 'string', description: 'Directory path (default: root)' },
+        branch: { type: 'string', description: 'Branch name (default: main)' }
+      },
+      required: ['owner', 'repo']
+    }
+  },
+  {
+    name: 'github_get_file',
+    description: 'Get the contents of a file in a GitHub repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'Repo owner username' },
+        repo: { type: 'string', description: 'Repository name' },
+        path: { type: 'string', description: 'File path' },
+        branch: { type: 'string', description: 'Branch name (default: main)' }
+      },
+      required: ['owner', 'repo', 'path']
+    }
+  },
+  {
+    name: 'github_create_file',
+    description: 'Create a new file in a GitHub repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'Repo owner username' },
+        repo: { type: 'string', description: 'Repository name' },
+        path: { type: 'string', description: 'File path e.g. src/index.js' },
+        content: { type: 'string', description: 'File content (plain text)' },
+        message: { type: 'string', description: 'Commit message' },
+        branch: { type: 'string', description: 'Branch name (default: main)' }
+      },
+      required: ['owner', 'repo', 'path', 'content', 'message']
+    }
+  },
+  {
+    name: 'github_update_file',
+    description: 'Update/edit an existing file in a GitHub repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'Repo owner username' },
+        repo: { type: 'string', description: 'Repository name' },
+        path: { type: 'string', description: 'File path' },
+        content: { type: 'string', description: 'New file content (plain text)' },
+        message: { type: 'string', description: 'Commit message' },
+        branch: { type: 'string', description: 'Branch name (default: main)' }
+      },
+      required: ['owner', 'repo', 'path', 'content', 'message']
+    }
+  },
+  {
+    name: 'github_delete_file',
+    description: 'Delete a file from a GitHub repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'Repo owner username' },
+        repo: { type: 'string', description: 'Repository name' },
+        path: { type: 'string', description: 'File path to delete' },
+        message: { type: 'string', description: 'Commit message' },
+        branch: { type: 'string', description: 'Branch name (default: main)' }
+      },
+      required: ['owner', 'repo', 'path', 'message']
+    }
+  },
+  {
+    name: 'github_list_branches',
+    description: 'List all branches in a GitHub repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'Repo owner username' },
+        repo: { type: 'string', description: 'Repository name' }
+      },
+      required: ['owner', 'repo']
+    }
+  },
+  {
+    name: 'github_create_branch',
+    description: 'Create a new branch in a GitHub repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'Repo owner username' },
+        repo: { type: 'string', description: 'Repository name' },
+        branch: { type: 'string', description: 'New branch name' },
+        from_branch: { type: 'string', description: 'Branch to create from (default: main)' }
+      },
+      required: ['owner', 'repo', 'branch']
+    }
+  },
+  {
+    name: 'github_list_actions',
+    description: 'List GitHub Actions workflow runs for a repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'Repo owner username' },
+        repo: { type: 'string', description: 'Repository name' }
+      },
+      required: ['owner', 'repo']
+    }
+  },
+  {
+    name: 'github_trigger_action',
+    description: 'Trigger a GitHub Actions workflow dispatch event',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'Repo owner username' },
+        repo: { type: 'string', description: 'Repository name' },
+        workflow_id: { type: 'string', description: 'Workflow file name e.g. deploy.yml' },
+        branch: { type: 'string', description: 'Branch to run on (default: main)' }
+      },
+      required: ['owner', 'repo', 'workflow_id']
+    }
+  },
+  {
+    name: 'github_create_pr',
+    description: 'Create a pull request in a GitHub repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'Repo owner username' },
+        repo: { type: 'string', description: 'Repository name' },
+        title: { type: 'string', description: 'PR title' },
+        body: { type: 'string', description: 'PR description' },
+        head: { type: 'string', description: 'Branch with changes' },
+        base: { type: 'string', description: 'Branch to merge into (default: main)' }
+      },
+      required: ['owner', 'repo', 'title', 'head']
+    }
+  },
+  {
+    name: 'github_list_issues',
+    description: 'List issues in a GitHub repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'Repo owner username' },
+        repo: { type: 'string', description: 'Repository name' },
+        state: { type: 'string', description: 'open, closed, or all (default: open)' }
+      },
+      required: ['owner', 'repo']
+    }
+  },
+  {
+    name: 'github_create_issue',
+    description: 'Create an issue in a GitHub repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'Repo owner username' },
+        repo: { type: 'string', description: 'Repository name' },
+        title: { type: 'string', description: 'Issue title' },
+        body: { type: 'string', description: 'Issue description' }
+      },
+      required: ['owner', 'repo', 'title']
+    }
   }
 ];
 
@@ -278,6 +511,107 @@ async function callTool(env, name, args) {
 
     case 'turso_describe_table':
       return turso(env, `PRAGMA table_info(${args.table})`);
+
+    // ── GitHub ─────────────────────────────────────────────────────────────────
+    case 'github_list_repos':
+      return github(env, 'GET', `/user/repos?type=${args.type ?? 'all'}&per_page=100&sort=updated`);
+
+    case 'github_get_repo':
+      return github(env, 'GET', `/repos/${args.owner}/${args.repo}`);
+
+    case 'github_create_repo':
+      return github(env, 'POST', '/user/repos', {
+        name: args.name,
+        description: args.description ?? '',
+        private: args.private ?? false,
+        auto_init: args.auto_init ?? true,
+      });
+
+    case 'github_list_files': {
+      const p = args.path ?? '';
+      const b = args.branch ?? 'main';
+      return github(env, 'GET', `/repos/${args.owner}/${args.repo}/contents/${p}?ref=${b}`);
+    }
+
+    case 'github_get_file': {
+      const b = args.branch ?? 'main';
+      const data = await github(env, 'GET', `/repos/${args.owner}/${args.repo}/contents/${args.path}?ref=${b}`);
+      if (data?.content) {
+        data.decoded_content = atob(data.content.replace(/\n/g, ''));
+      }
+      return data;
+    }
+
+    case 'github_create_file': {
+      const b = args.branch ?? 'main';
+      return github(env, 'PUT', `/repos/${args.owner}/${args.repo}/contents/${args.path}`, {
+        message: args.message,
+        content: btoa(unescape(encodeURIComponent(args.content))),
+        branch: b,
+      });
+    }
+
+    case 'github_update_file': {
+      const b = args.branch ?? 'main';
+      const sha = await getFileSha(env, args.owner, args.repo, args.path, b);
+      if (!sha) throw new Error(`File not found: ${args.path}`);
+      return github(env, 'PUT', `/repos/${args.owner}/${args.repo}/contents/${args.path}`, {
+        message: args.message,
+        content: btoa(unescape(encodeURIComponent(args.content))),
+        sha,
+        branch: b,
+      });
+    }
+
+    case 'github_delete_file': {
+      const b = args.branch ?? 'main';
+      const sha = await getFileSha(env, args.owner, args.repo, args.path, b);
+      if (!sha) throw new Error(`File not found: ${args.path}`);
+      return github(env, 'DELETE', `/repos/${args.owner}/${args.repo}/contents/${args.path}`, {
+        message: args.message,
+        sha,
+        branch: b,
+      });
+    }
+
+    case 'github_list_branches':
+      return github(env, 'GET', `/repos/${args.owner}/${args.repo}/branches`);
+
+    case 'github_create_branch': {
+      const fromBranch = args.from_branch ?? 'main';
+      const refData = await github(env, 'GET', `/repos/${args.owner}/${args.repo}/git/ref/heads/${fromBranch}`);
+      const sha = refData?.object?.sha;
+      if (!sha) throw new Error(`Branch not found: ${fromBranch}`);
+      return github(env, 'POST', `/repos/${args.owner}/${args.repo}/git/refs`, {
+        ref: `refs/heads/${args.branch}`,
+        sha,
+      });
+    }
+
+    case 'github_list_actions':
+      return github(env, 'GET', `/repos/${args.owner}/${args.repo}/actions/runs?per_page=20`);
+
+    case 'github_trigger_action':
+      return github(env, 'POST', `/repos/${args.owner}/${args.repo}/actions/workflows/${args.workflow_id}/dispatches`, {
+        ref: args.branch ?? 'main',
+      });
+
+    case 'github_create_pr':
+      return github(env, 'POST', `/repos/${args.owner}/${args.repo}/pulls`, {
+        title: args.title,
+        body: args.body ?? '',
+        head: args.head,
+        base: args.base ?? 'main',
+      });
+
+    case 'github_list_issues':
+      return github(env, 'GET', `/repos/${args.owner}/${args.repo}/issues?state=${args.state ?? 'open'}&per_page=50`);
+
+    case 'github_create_issue':
+      return github(env, 'POST', `/repos/${args.owner}/${args.repo}/issues`, {
+        title: args.title,
+        body: args.body ?? '',
+      });
 
     default:
       throw new Error(`Unknown tool: ${name}`);
