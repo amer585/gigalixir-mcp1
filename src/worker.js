@@ -23,6 +23,33 @@ async function api(env, method, path, body) {
   try { return JSON.parse(text); } catch { return { raw: text }; }
 }
 
+// ── Turso libSQL HTTP API ────────────────────────────────────────────────────
+
+async function turso(env, sql, args = []) {
+  const url = `${env.TURSO_DB_URL}/v2/pipeline`.replace('libsql://', 'https://');
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.TURSO_AUTH_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      requests: [
+        { type: 'execute', stmt: { sql, args: args.map(v => ({ type: 'text', value: String(v) })) } },
+        { type: 'close' }
+      ]
+    }),
+  });
+  const data = await res.json();
+  const result = data?.results?.[0]?.response?.result;
+  if (!result) return { error: data };
+  const cols = result.cols.map(c => c.name);
+  const rows = result.rows.map(row =>
+    Object.fromEntries(row.map((cell, i) => [cols[i], cell?.value ?? null]))
+  );
+  return { cols, rows, affected: result.affected_row_count ?? 0 };
+}
+
 const TOOLS = [
   {
     name: 'list_apps',
@@ -147,6 +174,48 @@ const TOOLS = [
       },
       required: ['app_name']
     }
+  },
+
+  // ── Turso tools ─────────────────────────────────────────────────────────────
+  {
+    name: 'turso_query',
+    description: 'Run a read-only SQL SELECT query on the Turso database and return rows',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sql: { type: 'string', description: 'SQL SELECT statement to execute' },
+        args: { type: 'array', items: { type: 'string' }, description: 'Optional positional args for ? placeholders' }
+      },
+      required: ['sql']
+    }
+  },
+  {
+    name: 'turso_execute',
+    description: 'Run a write SQL statement (INSERT, UPDATE, DELETE, CREATE TABLE, DROP) on the Turso database',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sql: { type: 'string', description: 'SQL statement to execute' },
+        args: { type: 'array', items: { type: 'string' }, description: 'Optional positional args for ? placeholders' }
+      },
+      required: ['sql']
+    }
+  },
+  {
+    name: 'turso_list_tables',
+    description: 'List all tables in the Turso database',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'turso_describe_table',
+    description: 'Get the schema/columns of a specific table in the Turso database',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        table: { type: 'string', description: 'Table name' }
+      },
+      required: ['table']
+    }
   }
 ];
 
@@ -196,6 +265,19 @@ async function callTool(env, name, args) {
       if (args.region) body.region = args.region;
       return api(env, 'POST', '/api/apps', body);
     }
+
+    // ── Turso ──────────────────────────────────────────────────────────────────
+    case 'turso_query':
+      return turso(env, args.sql, args.args ?? []);
+
+    case 'turso_execute':
+      return turso(env, args.sql, args.args ?? []);
+
+    case 'turso_list_tables':
+      return turso(env, "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name");
+
+    case 'turso_describe_table':
+      return turso(env, `PRAGMA table_info(${args.table})`);
 
     default:
       throw new Error(`Unknown tool: ${name}`);
