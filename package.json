@@ -1,0 +1,16 @@
+{
+  "name": "gigalixir-mcp",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Gigalixir MCP Server running on Cloudflare Workers",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "secret:email": "wrangler secret put GIGALIXIR_EMAIL",
+    "secret:key": "wrangler secret put GIGALIXIR_API_KEY"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
