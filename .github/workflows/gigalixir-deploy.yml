@@ -16,15 +16,16 @@ jobs:
 
       - name: Deploy to Gigalixir
         env:
-          GIGALIXIR_EMAIL: amerameryou1@gmail.com
-          GIGALIXIR_PASSWORD: ${{ secrets.GIGALIXIR_PASSWORD }}
+          GIGALIXIR_API_KEY: ${{ secrets.GIGALIXIR_API_KEY }}
           GIGALIXIR_APP: amer
         run: |
-          if [ -z "$GIGALIXIR_PASSWORD" ]; then
-            echo "Error: GIGALIXIR_PASSWORD is not set in GitHub repository secrets! Cannot deploy."
-            exit 1
+          if [ -z "$GIGALIXIR_API_KEY" ]; then
+             echo "Error: GIGALIXIR_API_KEY is not set in GitHub Repository Secrets! Deployment pipeline dead."
+             exit 1
           fi
-          pip3 install gigalixir
-          gigalixir login -e "$GIGALIXIR_EMAIL" -y -p "$GIGALIXIR_PASSWORD"
-          gigalixir git:remote $GIGALIXIR_APP
+          # Gigalixir accepts git push with https://<any>:<API_KEY>@git.gigalixir.com/<app>.git
+          git config --global user.email "bot@ai-studio"
+          git config --global user.name "AI Deploy Agent"
+          git remote add gigalixir https://apiKey:$GIGALIXIR_API_KEY@git.gigalixir.com/$GIGALIXIR_APP.git
+          git fetch gigalixir || true
           git push -f gigalixir main
