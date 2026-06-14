@@ -444,7 +444,7 @@ const TOOLS = [
     handler: async (env, args) => {
       const body = { unique_name: args.app_name };
       if (args.cloud) body.cloud = args.cloud;
-      if (args.region) body.region = args[1]?.region || args.region;
+      if (args.region) body.region = args.region;
       return gigalixirRequest(env, 'POST', '/api/apps', body);
     }
   },
@@ -543,7 +543,7 @@ const TOOLS = [
     },
     handler: async (env, args) => {
       const rawStmts = args.statements;
-      if (!rawStmts || raltStmts?.length === 0) {
+      if (!rawStmts || rawStmts?.length === 0) {
         throw new Error('Statements list cannot be empty');
       }
 
