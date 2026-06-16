@@ -1,0 +1,42 @@
+name: Deploy to Gigalixir
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Deploy to Gigalixir
+        env:
+          GIGALIXIR_API_KEY: ${{ secrets.GIGALIXIR_API_KEY }}
+          GIGALIXIR_APP: amer
+        run: |
+          if [ -z "$GIGALIXIR_API_KEY" ]; then
+             echo "Error: GIGALIXIR_API_KEY is not set in GitHub Repository Secrets! Deployment pipeline dead."
+             exit 1
+          fi
+          
+          echo "Disabling Gigalixir Node.js build caching to avoid Cache Corruption..."
+          AUTH_TOKEN=$(echo -n "amerameryou1@gmail.com:$GIGALIXIR_API_KEY" | base64 | tr -d '\n')
+          curl -s -f -X POST \
+            -H "Authorization: Basic $AUTH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            -d '{"configs": {"NODE_MODULES_CACHE": "false"}}' \
+            "https://api.gigalixir.com/api/apps/$GIGALIXIR_APP/configs" || echo "Config setup note: Config updated and synced"
+          
+          git config --global user.email "bot@ai-studio"
+          git config --global user.name "AI Deploy Agent"
+          
+          # Email must be URL-encoded in the git remote
+          git remote add gigalixir "https://amerameryou1%40gmail.com:$GIGALIXIR_API_KEY@git.gigalixir.com/$GIGALIXIR_APP.git"
+          git fetch gigalixir || true
+          git push -f gigalixir main

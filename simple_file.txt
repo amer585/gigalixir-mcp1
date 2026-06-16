@@ -1,0 +1,2 @@
+Hello World! Created by GigaLixir DevOps MCP.
+This file was updated, and is left here to verify Git file write capability.
