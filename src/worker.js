@@ -2539,6 +2539,24 @@ const TOOLS = [
     }
   },
   {
+    name: 'github_list_branches',
+    description: 'Retrieve all existing branches in the specified GitHub repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'GitHub organization or username' },
+        repo: { type: 'string', description: 'Repository name' },
+        github_token: { type: 'string', description: 'Optional distinct GitHub Personal Access Token' }
+      },
+      required: ['owner', 'repo']
+    },
+    handler: async (env, args) => {
+      const { owner, repo, github_token } = args;
+      const res = await githubRequest(env, 'GET', `/repos/${owner}/${repo}/branches`, null, github_token);
+      return { success: true, branches: Array.isArray(res) ? res.map(b => b.name) : [] };
+    }
+  },
+  {
     name: 'github_create_branch',
     description: 'Instantiate a brand new branch based on a parent/source reference',
     inputSchema: {
@@ -3091,6 +3109,636 @@ const TOOLS = [
         documentation: toolDocumentation
       };
     }
+  },
+  {
+    name: 'batch_execute',
+    description: 'Execute multiple tools under parallel or sequential control workflows with failure tolerances and timeout safeguards',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        parallel: { type: 'boolean', description: 'Set true to spawn operations in parallel, false to run sequentially', default: true },
+        continue_on_error: { type: 'boolean', description: 'Whether to keep running subsequent tasks if any task encounters a failure', default: true },
+        max_parallel: { type: 'number', description: 'The peak degree of parallel execution concurrency allowed (default is 5)', default: 5 },
+        operations: {
+          type: 'array',
+          description: 'A set of atomic operations specifying target tool action and their custom input parameters',
+          items: {
+            type: 'object',
+            properties: {
+              tool: { type: 'string', description: 'Fully qualified tool name in the registry to invoke' },
+              args: { type: 'object', description: 'Input arguments and options mapped for that tool' }
+            },
+            required: ['tool', 'args']
+          }
+        },
+        timeout_ms: { type: 'number', description: 'Maximum allowed execution duration for the operations in ms (default is 30000)', default: 30000 }
+      },
+      required: ['operations']
+    },
+    handler: async (env, args) => {
+      const { parallel = true, continue_on_error = true, max_parallel = 5, operations, timeout_ms = 30000 } = args;
+      if (!Array.isArray(operations)) {
+        throw new Error("Parameter 'operations' must be a valid array of runtime operations.");
+      }
+      if (operations.length > 20) {
+        throw new Error("Batch process exceeds maximum allowable load limit of 20 operations.");
+      }
+
+      // Check for recursive calls
+      for (const op of operations) {
+        if (op.tool === 'batch_execute') {
+          throw new Error("Security Violation: Recursive batch_execute call attempts are strictly forbidden.");
+        }
+      }
+
+      const results = [];
+      const startTime = Date.now();
+
+      const executeSingleOpWithTimeout = async (op, overallTimeoutMs) => {
+        const toolName = op.tool;
+        const toolArgs = op.args;
+        const targetTool = TOOLS.find(t => t.name === toolName);
+        if (!targetTool) {
+          return { status: 'failed', error: `Validation Failure: Tool '${toolName}' is unregistered.` };
+        }
+
+        // Create individual timeout promise
+        let timer;
+        const timeoutPromise = new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error(`Operation exceeded allowable execution limit of ${overallTimeoutMs}ms`));
+          }, overallTimeoutMs);
+        });
+
+        try {
+          const executePromise = executeTool(env, toolName, { ...toolArgs, dry_run: toolArgs.dry_run ?? args.dry_run });
+          const result = await Promise.race([executePromise, timeoutPromise]);
+          clearTimeout(timer);
+          return result;
+        } catch (err) {
+          clearTimeout(timer);
+          return { status: 'failed', error: err.message || String(err) };
+        }
+      };
+
+      if (parallel) {
+        const limit = Math.max(1, Math.min(max_parallel, 10));
+        let index = 0;
+        let metFail = false;
+
+        async function worker() {
+          while (index < operations.length && (!metFail || continue_on_error)) {
+            const currentIdx = index++;
+            if (currentIdx >= operations.length) break;
+            const op = operations[currentIdx];
+            try {
+              const res = await executeSingleOpWithTimeout(op, timeout_ms);
+              results[currentIdx] = { tool: op.tool, success: res.status === 'success', result: res };
+              if (res.status !== 'success' && !continue_on_error) {
+                metFail = true;
+                index = operations.length; // Prevent scheduling new ones
+              }
+            } catch (err) {
+              results[currentIdx] = { tool: op.tool, success: false, error: err.message || String(err) };
+              if (!continue_on_error) {
+                metFail = true;
+                index = operations.length;
+              }
+            }
+          }
+        }
+
+        const workers = Array.from({ length: Math.min(limit, operations.length) }, worker);
+        await Promise.all(workers);
+      } else {
+        for (let i = 0; i < operations.length; i++) {
+          const op = operations[i];
+          try {
+            const res = await executeSingleOpWithTimeout(op, timeout_ms);
+            results.push({ tool: op.tool, success: res.status === 'success', result: res });
+            if (res.status !== 'success' && !continue_on_error) {
+              break;
+            }
+          } catch (err) {
+            results.push({ tool: op.tool, success: false, error: err.message || String(err) });
+            if (!continue_on_error) {
+              break;
+            }
+          }
+        }
+      }
+
+      return {
+        success: results.every(r => r && r.success),
+        results,
+        execution_time_ms: Date.now() - startTime
+      };
+    }
+  },
+  {
+    name: 'github_delete_lines',
+    description: 'Surgically delete precise line ranges inside an existing codebase file using indices',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'GitHub organization or username' },
+        repo: { type: 'string', description: 'Repository name' },
+        path: { type: 'string', description: 'Target file path' },
+        start_line: { type: 'number', description: 'Starting line index to delete (inclusive, 1-indexed)' },
+        end_line: { type: 'number', description: 'Ending line index to delete (inclusive, 1-indexed)' },
+        message: { type: 'string', description: 'Commit message for the line deletion' },
+        branch: { type: 'string', description: 'Target branch name (default: main)', default: 'main' },
+        github_token: { type: 'string', description: 'Optional distinct GitHub Personal Access Token' }
+      },
+      required: ['owner', 'repo', 'path', 'start_line', 'end_line', 'message']
+    },
+    handler: async (env, args) => {
+      const { owner, repo, path, start_line, end_line, message, branch = 'main', github_token } = args;
+      const fileData = await githubRequest(env, 'GET', `/repos/${owner}/${repo}/contents/${path}?ref=${branch}`, null, github_token);
+      if (!fileData || !fileData.content) {
+        throw new Error(`File not found: ${path} on branch ${branch}`);
+      }
+      const content = Buffer.from(fileData.content, 'base64').toString('utf8');
+      const lines = content.split(/\r?\n/);
+      
+      const sIdx = Math.max(1, start_line) - 1;
+      const eIdx = Math.max(sIdx + 1, end_line);
+      lines.splice(sIdx, eIdx - sIdx); // Delete lines
+      
+      const finalContent = lines.join('\n');
+      const updated = await githubRequest(env, 'PUT', `/repos/${owner}/${repo}/contents/${path}`, {
+        message,
+        content: Buffer.from(finalContent, 'utf8').toString('base64'),
+        sha: fileData.sha,
+        branch
+      }, github_token);
+      return { success: true, path, updated };
+    }
+  },
+  {
+    name: 'github_insert_lines',
+    description: 'Insert new lines of code securely before or after a target line index',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'GitHub organization or username' },
+        repo: { type: 'string', description: 'Repository name' },
+        path: { type: 'string', description: 'Target file path' },
+        content_to_insert: { type: 'string', description: 'The text/code string to insert' },
+        after_line: { type: 'number', description: 'Line index after which to insert (inclusive, 1-indexed)' },
+        before_line: { type: 'number', description: 'Line index before which to insert (inclusive, 1-indexed)' },
+        message: { type: 'string', description: 'Commit message' },
+        branch: { type: 'string', description: 'Target branch name (default: main)', default: 'main' },
+        github_token: { type: 'string', description: 'Optional distinct GitHub Personal Access Token' }
+      },
+      required: ['owner', 'repo', 'path', 'content_to_insert', 'message']
+    },
+    handler: async (env, args) => {
+      const { owner, repo, path, content_to_insert, after_line, before_line, message, branch = 'main', github_token } = args;
+      const fileData = await githubRequest(env, 'GET', `/repos/${owner}/${repo}/contents/${path}?ref=${branch}`, null, github_token);
+      if (!fileData || !fileData.content) {
+        throw new Error(`File not found: ${path} on branch ${branch}`);
+      }
+      const content = Buffer.from(fileData.content, 'base64').toString('utf8');
+      const lines = content.split(/\r?\n/);
+      
+      let insertIdx = lines.length;
+      if (after_line !== undefined) {
+        insertIdx = Math.max(0, Math.min(after_line, lines.length));
+      } else if (before_line !== undefined) {
+        insertIdx = Math.max(0, Math.min(before_line - 1, lines.length));
+      }
+
+      const insertLines = content_to_insert.split(/\r?\n/);
+      lines.splice(insertIdx, 0, ...insertLines);
+      
+      const finalContent = lines.join('\n');
+      const updated = await githubRequest(env, 'PUT', `/repos/${owner}/${repo}/contents/${path}`, {
+        message,
+        content: Buffer.from(finalContent, 'utf8').toString('base64'),
+        sha: fileData.sha,
+        branch
+      }, github_token);
+      return { success: true, path, updated };
+    }
+  },
+  {
+    name: 'github_move_directory',
+    description: 'Relocate isomorphically an entire directory and all its files recursion paths',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'GitHub organization or username' },
+        repo: { type: 'string', description: 'Repository name' },
+        source_dir: { type: 'string', description: 'Path to source directory' },
+        destination_dir: { type: 'string', description: 'Path to destination directory' },
+        message: { type: 'string', description: 'Commit message' },
+        branch: { type: 'string', description: 'Target branch name (default: main)', default: 'main' },
+        github_token: { type: 'string', description: 'Optional distinct GitHub Personal Access Token' }
+      },
+      required: ['owner', 'repo', 'source_dir', 'destination_dir', 'message']
+    },
+    handler: async (env, args) => {
+      const { owner, repo, source_dir, destination_dir, message, branch = 'main', github_token } = args;
+      const cleanSrc = source_dir.replace(/^\/+|\/+$/g, '');
+      const cleanDest = destination_dir.replace(/^\/+|\/+$/g, '');
+
+      const treeRes = await githubRequest(env, 'GET', `/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`, null, github_token);
+      if (!treeRes || !Array.isArray(treeRes.tree)) {
+        throw new Error(`Failed to fetch tree structure of repository.`);
+      }
+
+      const blobs = treeRes.tree.filter(node => node.type === 'blob' && node.path.startsWith(cleanSrc + '/'));
+      if (blobs.length === 0) {
+        throw new Error(`No files found under the directory "${source_dir}" to move.`);
+      }
+
+      const movedFiles = [];
+      for (const blob of blobs) {
+        const fileContent = await githubRequest(env, 'GET', `/repos/${owner}/${repo}/contents/${blob.path}?ref=${branch}`, null, github_token);
+        if (!fileContent || !fileContent.content) continue;
+        
+        const newPath = blob.path.replace(cleanSrc, cleanDest);
+        
+        await githubRequest(env, 'PUT', `/repos/${owner}/${repo}/contents/${newPath}`, {
+          message: `Move: Copy ${blob.path} to ${newPath} - ${message}`,
+          content: fileContent.content,
+          branch
+        }, github_token);
+
+        await githubRequest(env, 'DELETE', `/repos/${owner}/${repo}/contents/${blob.path}`, {
+          message: `Move: Delete ${blob.path} - ${message}`,
+          sha: fileContent.sha,
+          branch
+        }, github_token);
+
+        movedFiles.push({ old_path: blob.path, new_path: newPath });
+      }
+
+      return { success: true, moved_files: movedFiles };
+    }
+  },
+  {
+    name: 'github_rename_symbol',
+    description: 'Renames a target symbol (function, class, etc.) across the entire code repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'GitHub organization or username' },
+        repo: { type: 'string', description: 'Repository name' },
+        symbol_name: { type: 'string', description: 'The exact symbol name to match' },
+        new_name: { type: 'string', description: 'The new replacement symbol name' },
+        message: { type: 'string', description: 'Commit message' },
+        branch: { type: 'string', description: 'Target branch name (default: main)', default: 'main' },
+        github_token: { type: 'string', description: 'Optional distinct GitHub Personal Access Token' }
+      },
+      required: ['owner', 'repo', 'symbol_name', 'new_name', 'message']
+    },
+    handler: async (env, args) => {
+      const { owner, repo, symbol_name, new_name, message, branch = 'main', github_token } = args;
+      const treeRes = await githubRequest(env, 'GET', `/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`, null, github_token);
+      if (!treeRes || !Array.isArray(treeRes.tree)) {
+        throw new Error(`Failed to load repository tree.`);
+      }
+
+      const textExtensions = ['.js', '.ts', '.tsx', '.jsx', '.md', '.json', '.py', '.html', '.css', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.rb', '.yml', '.yaml'];
+      const fileNodes = treeRes.tree.filter(node => 
+        node.type === 'blob' && 
+        textExtensions.some(ext => node.path.endsWith(ext))
+      );
+
+      const updatedFiles = [];
+      const regex = new RegExp(`\\b${symbol_name}\\b`, 'g');
+
+      for (const node of fileNodes) {
+        const fileRes = await githubRequest(env, 'GET', `/repos/${owner}/${repo}/contents/${node.path}?ref=${branch}`, null, github_token);
+        if (!fileRes || !fileRes.content) continue;
+        const content = Buffer.from(fileRes.content, 'base64').toString('utf8');
+        
+        if (regex.test(content)) {
+          const updatedContent = content.replace(regex, new_name);
+          await githubRequest(env, 'PUT', `/repos/${owner}/${repo}/contents/${node.path}`, {
+            message: `Rename symbol: ${symbol_name} to ${new_name} - ${message}`,
+            content: Buffer.from(updatedContent, 'utf8').toString('base64'),
+            sha: fileRes.sha,
+            branch
+          }, github_token);
+          updatedFiles.push(node.path);
+        }
+      }
+
+      return { success: true, updated_files: updatedFiles, count: updatedFiles.length };
+    }
+  },
+  {
+    name: 'github_find_related_files',
+    description: 'Uses path similarity and contextual search heuristics to discover related files in the repository',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'GitHub organization or username' },
+        repo: { type: 'string', description: 'Repository name' },
+        query: { type: 'string', description: 'Contextual search queries (e.g., auth, test, routes)' },
+        branch: { type: 'string', description: 'Target branch location (default: main)', default: 'main' },
+        github_token: { type: 'string', description: 'Optional distinct GitHub Personal Access Token' }
+      },
+      required: ['owner', 'repo', 'query']
+    },
+    handler: async (env, args) => {
+      const { owner, repo, query, branch = 'main', github_token } = args;
+
+      const treeRes = await githubRequest(env, 'GET', `/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`, null, github_token);
+      const allPaths = Array.isArray(treeRes?.tree) ? treeRes.tree.map(node => node.path) : [];
+
+      const queryLower = query.toLowerCase();
+      const pathMatches = allPaths.filter(p => p.toLowerCase().includes(queryLower));
+
+      let contentMatches = [];
+      try {
+        const searchRes = await githubRequest(env, 'GET', `/search/code?q=${encodeURIComponent(query)}+repo:${owner}/${repo}`, null, github_token);
+        if (searchRes && Array.isArray(searchRes.items)) {
+          contentMatches = searchRes.items.map(item => item.path);
+        }
+      } catch {
+        // Fallback silently if unindexed or rate-limited
+      }
+
+      const combined = new Set([...pathMatches, ...contentMatches]);
+      const results = Array.from(combined).map(p => {
+        let score = 0;
+        let reasons = [];
+        if (p.toLowerCase().includes(queryLower)) {
+          score += 10;
+          reasons.push('Name similarity');
+        }
+        if (contentMatches.includes(p)) {
+          score += 5;
+          reasons.push('Matches code search');
+        }
+        return { path: p, score, reasons };
+      });
+
+      results.sort((a, b) => b.score - a.score);
+
+      return { success: true, query, results: results.slice(0, 15) };
+    }
+  },
+  {
+    name: 'github_tree',
+    description: 'Fetch folder contents or quick codebase structural trees without full recursive overhead',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string', description: 'GitHub organization or username' },
+        repo: { type: 'string', description: 'Repository name' },
+        path: { type: 'string', description: 'The parent folder path (optional)', default: '' },
+        branch: { type: 'string', description: 'Repository branch name (default: main)', default: 'main' },
+        github_token: { type: 'string', description: 'Optional distinct GitHub Personal Access Token' }
+      },
+      required: ['owner', 'repo']
+    },
+    handler: async (env, args) => {
+      const { owner, repo, path = '', branch = 'main', github_token } = args;
+      const res = await githubRequest(env, 'GET', `/repos/${owner}/${repo}/contents/${path}?ref=${branch}`, null, github_token);
+      
+      if (Array.isArray(res)) {
+        return {
+          success: true,
+          path,
+          items: res.map(item => ({
+            name: item.name,
+            path: item.path,
+            type: item.type,
+            size: item.size,
+            sha: item.sha
+          }))
+        };
+      }
+      return { success: true, path, info: res };
+    }
+  },
+  {
+    name: 'github_get_commit_history',
+    description: 'Retrieve commit details and edit history for audit purposes',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string' },
+        repo: { type: 'string' },
+        path: { type: 'string', description: 'Filter commits by file path (optional)' },
+        branch: { type: 'string', description: 'Repository branch name (default: main)', default: 'main' },
+        per_page: { type: 'number', description: 'Number of items per page', default: 10 },
+        github_token: { type: 'string', description: 'Optional distinct GitHub Personal Access Token' }
+      },
+      required: ['owner', 'repo']
+    },
+    handler: async (env, args) => {
+      const { owner, repo, path, branch = 'main', per_page = 10, github_token } = args;
+      let url = `/repos/${owner}/${repo}/commits?sha=${branch}&per_page=${per_page}`;
+      if (path) {
+        url += `&path=${encodeURIComponent(path)}`;
+      }
+      const commits = await githubRequest(env, 'GET', url, null, github_token);
+      return {
+        success: true,
+        commits: Array.isArray(commits) ? commits.map(c => ({
+          sha: c.sha,
+          author: c.commit?.author?.name || c.author?.login,
+          email: c.commit?.author?.email,
+          message: c.commit?.message,
+          date: c.commit?.author?.date
+        })) : []
+      };
+    }
+  },
+  {
+    name: 'github_blame_file',
+    description: 'Audit file line origins and view git blame using GraphQL or REST backup heuristics',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string' },
+        repo: { type: 'string' },
+        path: { type: 'string', description: 'Target file path' },
+        branch: { type: 'string', description: 'Branch name (default: main)', default: 'main' },
+        github_token: { type: 'string', description: 'Optional distinct GitHub Personal Access Token' }
+      },
+      required: ['owner', 'repo', 'path']
+    },
+    handler: async (env, args) => {
+      const { owner, repo, path, branch = 'main', github_token } = args;
+
+      try {
+        const query = `
+          query($owner: String!, $repo: String!, $path: String!, $branch: String!) {
+            repository(owner: $owner, name: $repo) {
+              ref(qualifiedName: $branch) {
+                target {
+                  ... on Commit {
+                    blame(path: $path) {
+                      ranges {
+                        startingLine
+                        endingLine
+                        commit {
+                          oid
+                          message
+                          authoredDate
+                          author {
+                            name
+                            email
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        `;
+        const res = await githubRequest(env, 'POST', '/graphql', {
+          query,
+          variables: { owner, repo, path, branch }
+        }, github_token);
+
+        if (res?.data?.repository?.ref?.target?.blame?.ranges) {
+          return {
+            success: true,
+            method: 'graphql',
+            ranges: res.data.repository.ref.target.blame.ranges
+          };
+        }
+      } catch (err) {
+        // Fallback to REST chronology
+      }
+
+      try {
+        const commits = await githubRequest(env, 'GET', `/repos/${owner}/${repo}/commits?path=${encodeURIComponent(path)}&sha=${branch}`, null, github_token);
+        return {
+          success: true,
+          method: 'rest_commits_fallback',
+          message: 'GraphQL blame was unavailable. Showing chronological file commits list instead.',
+          commits: Array.isArray(commits) ? commits.slice(0, 10).map(c => ({
+            sha: c.sha,
+            author: c.commit?.author?.name,
+            message: c.commit?.message,
+            date: c.commit?.author?.date
+          })) : []
+        };
+      } catch (err2) {
+        throw new Error(`Failed to blame file: ${err2.message || err2}`);
+      }
+    }
+  },
+  {
+    name: 'github_open_pr',
+    description: 'Compose high-performance pull requests with custom reviewers, labels, and draft options',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string' },
+        repo: { type: 'string' },
+        title: { type: 'string' },
+        head: { type: 'string', description: 'Branch with changes' },
+        base: { type: 'string', description: 'Base branch to pull into (default: main)', default: 'main' },
+        body: { type: 'string', description: 'Body markdown description of pull request' },
+        draft: { type: 'boolean', description: 'Open as draft PR' },
+        reviewers: { type: 'array', items: { type: 'string' }, description: 'Username arrays to request review' },
+        labels: { type: 'array', items: { type: 'string' }, description: 'Issue label tags' },
+        github_token: { type: 'string', description: 'Optional distinct GitHub Personal Access Token' }
+      },
+      required: ['owner', 'repo', 'title', 'head']
+    },
+    handler: async (env, args) => {
+      const { owner, repo, title, head, base = 'main', body = '', draft = false, reviewers = [], labels = [], github_token } = args;
+      const prRes = await githubRequest(env, 'POST', `/repos/${owner}/${repo}/pulls`, {
+        title,
+        head,
+        base,
+        body,
+        draft
+      }, github_token);
+
+      const prNumber = prRes?.number;
+      if (prNumber) {
+        if (reviewers.length > 0) {
+          try {
+            await githubRequest(env, 'POST', `/repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`, {
+              reviewers
+            }, github_token);
+          } catch {}
+        }
+        if (labels.length > 0) {
+          try {
+            await githubRequest(env, 'POST', `/repos/${owner}/${repo}/issues/${prNumber}/labels`, {
+              labels
+            }, github_token);
+          } catch {}
+        }
+      }
+
+      return { success: true, pr_url: prRes?.html_url, pr_number: prNumber, result: prRes };
+    }
+  },
+  {
+    name: 'github_refactor',
+    description: 'High-level refactoring like function extraction or class translation',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string' },
+        repo: { type: 'string' },
+        path: { type: 'string' },
+        operation: { type: 'string', enum: ['extract_function', 'rename_symbol', 'move_class', 'inline_variable'] },
+        params: { type: 'object', description: 'Details depending on refactoring type' },
+        message: { type: 'string' },
+        branch: { type: 'string', description: 'Target branch name (default: main)', default: 'main' },
+        github_token: { type: 'string', description: 'Optional distinct GitHub Personal Access Token' }
+      },
+      required: ['owner', 'repo', 'path', 'operation', 'params', 'message']
+    },
+    handler: async (env, args) => {
+      const { owner, repo, path, operation, params, message, branch = 'main', github_token } = args;
+      const fileData = await githubRequest(env, 'GET', `/repos/${owner}/${repo}/contents/${path}?ref=${branch}`, null, github_token);
+      if (!fileData || !fileData.content) {
+        throw new Error(`File not found: ${path}`);
+      }
+      const content = Buffer.from(fileData.content, 'base64').toString('utf8');
+
+      let updatedContent = content;
+
+      if (operation === 'rename_symbol') {
+        const { symbol_name, new_name } = params;
+        if (!symbol_name || !new_name) throw new Error('Missing symbol_name or new_name in params.');
+        const regex = new RegExp(`\\b${symbol_name}\\b`, 'g');
+        updatedContent = content.replace(regex, new_name);
+      } else if (operation === 'extract_function') {
+        const { function_name, lines_to_extract, argument_strings = '' } = params;
+        if (!function_name || !lines_to_extract) throw new Error('Missing function_name or lines_to_extract.');
+        
+        const lines = content.split(/\r?\n/);
+        const sIdx = Math.max(1, lines_to_extract.start) - 1;
+        const eIdx = Math.max(sIdx + 1, lines_to_extract.end);
+        
+        const extractedLines = lines.slice(sIdx, eIdx);
+        const indent = extractedLines[0]?.match(/^\s*/)?.[0] || '  ';
+        const funcDefinition = `\n\nfunction ${function_name}(${argument_strings}) {\n${extractedLines.map(l => '  ' + l).join('\n')}\n}\n`;
+        
+        lines.splice(sIdx, eIdx - sIdx, `${indent}const result = ${function_name}(${argument_strings});`);
+        updatedContent = lines.join('\n') + funcDefinition;
+      } else {
+        throw new Error(`Refactoring type "${operation}" is not fully implemented textually. Please do manual edit_lines instead.`);
+      }
+
+      await githubRequest(env, 'PUT', `/repos/${owner}/${repo}/contents/${path}`, {
+        message,
+        content: Buffer.from(updatedContent, 'utf8').toString('base64'),
+        sha: fileData.sha,
+        branch
+      }, github_token);
+
+      return { success: true, path, operation };
+    }
   }
 ];
 
@@ -3178,7 +3826,7 @@ async function executeTool(env, name, args) {
   const timestamp = new Date().toISOString();
 
   // 1. Dry Run interceptor
-  const isDryRun = args.dry_run === true;
+  const isDryRun = args.dry_run === true && name !== 'batch_execute';
   if (isDryRun) {
     const explanation = getDryRunExplanation(name, args);
     const trace = {
