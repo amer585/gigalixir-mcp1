@@ -44,6 +44,9 @@ async function callMcpTool(name, args) {
     const textContent = resJson.result.content[0].text;
     const outer = JSON.parse(textContent);
     if (outer && typeof outer === 'object') {
+      if (outer.status === 'failed') {
+        throw new Error(outer.error || 'Execution failed');
+      }
       if ('data' in outer && outer.data && typeof outer.data === 'object') {
         const combined = { ...outer.data };
         combined.status = outer.status;
@@ -81,12 +84,9 @@ function assert(condition, message) {
 // ── TEST CASES ───────────────────────────────────────────────────────────────
 
 test('Single tool execution (dry_run)', async () => {
-  const result = await callMcpTool('github_create_file', {
-    owner: 'example',
-    repo: 'app',
-    path: 'test.js',
-    content: 'console.log("hello");',
-    message: 'add test',
+  const result = await callMcpTool('scale', {
+    app_name: 'example-app',
+    replicas: 4,
     dry_run: true
   });
 
@@ -103,32 +103,27 @@ test('Multiple parallel executions via batch_execute (dry_run)', async () => {
     dry_run: true,
     operations: [
       {
-        tool: 'github_create_file',
+        tool: 'scale',
         args: {
-          owner: 'example',
-          repo: 'app',
-          path: 'src/a.js',
-          content: 'A',
-          message: 'add a'
+          app_name: 'app-a',
+          replicas: 2
         }
       },
       {
-        tool: 'github_update_file',
+        tool: 'set_config',
         args: {
-          owner: 'example',
-          repo: 'app',
-          path: 'src/b.js',
-          content: 'B',
-          message: 'add b'
+          app_name: 'app-a',
+          key: 'FOO',
+          value: 'BAR'
         }
       }
     ]
   });
 
   assert(result.success === true, 'Multiple parallel tools ran successfully');
-  assert(result.results.length === 2, 'Should return results for exactly 2 operations');
-  assert(result.results[0].success === true, 'Operation 1 was successful');
-  assert(result.results[1].success === true, 'Operation 2 was successful');
+  assert(result.batch_results.length === 2, 'Should return results for exactly 2 operations');
+  assert(result.batch_results[0].success === true, 'Operation 1 was successful');
+  assert(result.batch_results[1].success === true, 'Operation 2 was successful');
 });
 
 test('Multiple sequential executions via batch_execute (dry_run)', async () => {
@@ -138,32 +133,27 @@ test('Multiple sequential executions via batch_execute (dry_run)', async () => {
     dry_run: true,
     operations: [
       {
-        tool: 'github_create_file',
+        tool: 'scale',
         args: {
-          owner: 'example',
-          repo: 'app',
-          path: 'src/x.js',
-          content: 'X',
-          message: 'add x'
+          app_name: 'app-x',
+          replicas: 1
         }
       },
       {
-        tool: 'github_update_file',
+        tool: 'set_config',
         args: {
-          owner: 'example',
-          repo: 'app',
-          path: 'src/y.js',
-          content: 'Y',
-          message: 'add y'
+          app_name: 'app-x',
+          key: 'BAZ',
+          value: 'QUX'
         }
       }
     ]
   });
 
   assert(result.success === true, 'Sequential batch executions completed');
-  assert(result.results.length === 2, 'Should return exactly 2 results');
-  assert(result.results[0].tool === 'github_create_file', 'First tool corresponds matches');
-  assert(result.results[1].tool === 'github_update_file', 'Second tool matches');
+  assert(result.batch_results.length === 2, 'Should return exactly 2 results');
+  assert(result.batch_results[0].tool === 'scale', 'First tool corresponds matches');
+  assert(result.batch_results[1].tool === 'set_config', 'Second tool matches');
 });
 
 test('Invalid tool names handling', async () => {
@@ -178,15 +168,15 @@ test('Invalid tool names handling', async () => {
   });
 
   assert(result.success === false, 'Batch should report overall failure');
-  assert(result.results[0].success === false, 'Tool execution should report failure');
-  assert(result.results[0].result.error.includes('unregistered'), 'Result should specify unknown metadata');
+  assert(result.batch_results[0].success === false, 'Tool execution should report failure');
+  assert(result.batch_results[0].error.includes('Missing tool'), 'Result should specify unregistered message');
 });
 
 test('Invalid arguments handling (schema mismatch validation)', async () => {
   try {
-    // missing required parameter 'repo' in 'github_get_file'
-    await callMcpTool('github_get_file', {
-      owner: 'example'
+    // missing required parameter 'app_name' in 'scale'
+    await callMcpTool('scale', {
+      replicas: 2
     });
     assert(false, 'Should have thrown on missing required parameter');
   } catch (err) {
@@ -201,31 +191,26 @@ test('Tool failures check (continue_on_error = true)', async () => {
     dry_run: true,
     operations: [
       {
-        tool: 'github_create_file',
+        tool: 'scale',
         args: {
-          owner: 'example',
-          // missing 'repo' -> will fail schema mismatch validation
-          path: 'foo.txt',
-          content: 'foo',
-          message: 'add foo'
+          // missing 'app_name' -> will fail schema validation
+          replicas: 5
         }
       },
       {
-        tool: 'github_update_file',
+        tool: 'set_config',
         args: {
-          owner: 'example',
-          repo: 'app',
-          path: 'bar.txt',
-          content: 'bar',
-          message: 'add bar'
+          app_name: 'app-fail',
+          key: 'FOO',
+          value: 'BAR'
         }
       }
     ]
   });
 
   assert(result.success === false, 'Should be unsuccessful due to a failed child tool');
-  assert(result.results[0].success === false, 'First operation failed due to schema parameters check');
-  assert(result.results[1].success === true, 'Second operation succeeded because continue_on_error is set true');
+  assert(result.batch_results[0].success === false, 'First operation failed due to schema parameters check');
+  assert(result.batch_results[1].success === true, 'Second operation succeeded because continue_on_error is set true');
 });
 
 test('Tool failures check (continue_on_error = false / fail_fast)', async () => {
@@ -235,31 +220,26 @@ test('Tool failures check (continue_on_error = false / fail_fast)', async () => 
     dry_run: true,
     operations: [
       {
-        tool: 'github_create_file',
+        tool: 'scale',
         args: {
-          owner: 'example',
-          // missing 'repo' -> fails
-          path: 'foo.txt',
-          content: 'foo',
-          message: 'add foo'
+          // missing 'app_name' -> fails
+          replicas: 5
         }
       },
       {
-        tool: 'github_update_file',
+        tool: 'set_config',
         args: {
-          owner: 'example',
-          repo: 'app',
-          path: 'bar.txt',
-          content: 'bar',
-          message: 'add bar'
+          app_name: 'app-fail',
+          key: 'FOO',
+          value: 'BAR'
         }
       }
     ]
   });
 
   assert(result.success === false, 'Should be unsuccessful');
-  assert(result.results.length === 1, 'Only first operation ran, second was bypassed due to fail_fast');
-  assert(result.results[0].success === false, 'First operation is recorded as failure');
+  assert(result.batch_results.length === 1, 'Only first operation ran, second was bypassed due to fail_fast');
+  assert(result.batch_results[0].success === false, 'First operation is recorded as failure');
 });
 
 test('Timeout limits protection', async () => {
@@ -268,56 +248,59 @@ test('Timeout limits protection', async () => {
     timeout_ms: 1, // extremely aggressive timeout to force a race condition
     operations: [
       {
-        tool: 'github_get_file',
+        tool: 'scale',
         args: {
-          owner: 'example',
-          repo: 'app',
-          path: 'README.md'
+          app_name: 'app-timeout',
+          replicas: 2
         }
       }
     ]
   });
 
   assert(result.success === false, 'Execution should be unsuccessful due to timeout');
-  assert(result.results[0].success === false, 'Result was recorded as failure');
-  const errorMsg = result.results[0].error || result.results[0].result?.error || '';
-  assert(errorMsg.includes('exceeded'), 'Result error contains informative exceeded text');
+  assert(result.batch_results[0].success === false, 'Result was recorded as failure');
+  const errorMsg = result.batch_results[0].error || '';
+  assert(errorMsg.includes('took longer than') || errorMsg.includes('Timeout'), 'Result error contains informative timeout message');
 });
 
 test('Max operations limits check (operations count = 21)', async () => {
   const fakeOps = Array.from({ length: 21 }, () => ({
-    tool: 'github_create_file',
-    args: { owner: 'example', repo: 'app', path: 'x.js', content: 'x', message: 'x', dry_run: true }
+    tool: 'scale',
+    args: { app_name: 'example-app', replicas: 1, dry_run: true }
   }));
 
-  const result = await callMcpTool('batch_execute', {
-    operations: fakeOps
-  });
-
-  assert(result.status === 'failed', 'Should have failed with operation limit error');
-  assert(result.error.includes('exceeds'), 'Throws error explaining maximum operations limits exceeded');
+  try {
+    await callMcpTool('batch_execute', {
+      operations: fakeOps
+    });
+    assert(false, 'Should have failed with operation limit error');
+  } catch (err) {
+    assert(err.message.includes('exceeds'), 'Throws error explaining maximum operations limits exceeded');
+  }
 });
 
 test('Recursive batch_execute validation prevention', async () => {
-  const result = await callMcpTool('batch_execute', {
-    operations: [
-      {
-        tool: 'batch_execute',
-        args: {
-          operations: []
+  try {
+    await callMcpTool('batch_execute', {
+      operations: [
+        {
+          tool: 'batch_execute',
+          args: {
+            operations: []
+          }
         }
-      }
-    ]
-  });
-
-  assert(result.status === 'failed', 'Should have rejected recursive execution');
-  assert(result.error.includes('Recursive'), 'Assert rejection matches security prevention pattern');
+      ]
+    });
+    assert(false, 'Should have rejected recursive execution');
+  } catch (err) {
+    assert(err.message.includes('prohibited') || err.message.includes('Recursive'), 'Assert rejection matches security prevention pattern');
+  }
 });
 
 test('Large operations sets (operations count = 20)', async () => {
   const fakeOps = Array.from({ length: 20 }, (v, i) => ({
-    tool: 'github_create_file',
-    args: { owner: 'example', repo: 'app', path: `file_${i}.js`, content: 'ok', message: 'save', dry_run: true }
+    tool: 'scale',
+    args: { app_name: `app-${i}`, replicas: 2, dry_run: true }
   }));
 
   const result = await callMcpTool('batch_execute', {
@@ -326,7 +309,7 @@ test('Large operations sets (operations count = 20)', async () => {
   });
 
   assert(result.success === true, 'Full set of 20 operations completed successfully');
-  assert(result.results.length === 20, 'Returned exactly 20 distinct task results');
+  assert(result.batch_results.length === 20, 'Returned exactly 20 distinct task results');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
