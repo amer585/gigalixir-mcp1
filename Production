@@ -1,0 +1,1229 @@
+# بوابة المدرسة - School Portal (Light Mode Only)
+
+بوابة إلكترونية متكاملة للطلاب والمعلمين لعرض ومتابعة النتائج الدراسية، الحضور والغياب، والإعلانات المدرسية مع مساعد ذكي مدمج مدعوم بالذكاء الاصطناعي (Gemini). تم تصميم هذا الكود ليعمل بالكامل باللون الفاتح (Light Mode) وبدون أي أكواد إضافية للوضع الداكن (Dark Mode) لضمان البساطة والوضوح العالي.
+
+---
+
+## هيكلية المشروع (Project Structure)
+
+* `index.html` - الصفحة الرئيسية الحاضنة للتطبيق مع إعدادات الخطوط والـ Tailwind.
+* `index.tsx` - نقطة الانطلاق لتركيب تطبيق React.
+* `App.tsx` - المكون الرئيسي الذي يدير التنقل والبيانات وعمليات الحفظ والتراجع.
+* `components/Header.tsx` - شريط التنقل العلوي البسيط.
+* `components/Footer.tsx` - الجزء السفلي من الصفحة.
+* `components/Hero.tsx` - واجهة الترحيب الأساسية.
+* `components/Illustration.tsx` - الرسم التوضيحي التفاعلي ببطاقات الإحصاءات.
+* `components/LoginPage.tsx` - صفحة دخول الطلاب بواسطة الرقم القومي.
+* `components/TeacherLoginPage.tsx` - صفحة دخول المعلمين لاختيار المادة.
+* `components/StudentDashboard.tsx` - لوحة تحكم الطالب (الدرجات، الغياب، الجدول، الإعلانات).
+* `components/TeacherDashboard.tsx` - لوحة تحكم المعلم الشاملة لرصد الدرجات، الغياب، والإعلانات مع دعم التراجع والإعادة (Undo/Redo).
+* `components/SchoolAssistant.tsx` - المساعد الذكي التفاعلي المربوط بـ Gemini للإجابة على تساؤلات الطلاب.
+
+---
+
+## الأكواد الكاملة للمشروع (Full Source Code)
+
+### 1. `index.html`
+```html
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>بوابة المدرسة - School Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Cairo', 'sans-serif'],
+            },
+            colors: {
+              brand: {
+                blue: '#1e88e5',
+                dark: '#0f172a',
+                light: '#f8fafc',
+                card: '#cceeff',
+              }
+            },
+            animation: {
+              'blob': 'blob 7s infinite',
+              'shimmer': 'shimmer 2s linear infinite',
+            },
+            keyframes: {
+              blob: {
+                '0%': { transform: 'translate(0px, 0px) scale(1)' },
+                '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
+                '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
+                '100%': { transform: 'translate(0px, 0px) scale(1)' },
+              },
+              shimmer: {
+                from: { backgroundPosition: '0 0' },
+                to: { backgroundPosition: '-200% 0' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        font-family: 'Cairo', sans-serif;
+        overflow-x: hidden;
+        background-color: #f8fafc;
+      }
+      #root {
+        height: 100%;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      
+      .initial-loader {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        width: 100vw;
+        background-color: #f8fafc;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      .spinner {
+        width: 50px;
+        height: 50px;
+        border: 5px solid rgba(30, 136, 229, 0.3);
+        border-radius: 50%;
+        border-top-color: #1e88e5;
+        animation: spin 1s ease-in-out infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .loader-text { font-size: 0.875rem; color: #64748b; }
+    </style>
+  <link rel="stylesheet" href="/index.css">
+</head>
+  <body class="transition-colors duration-300">
+    <div id="root">
+      <div class="initial-loader">
+        <div class="spinner"></div>
+        <div class="loader-text">جاري تحميل البوابة...</div>
+      </div>
+    </div>
+    <script type="module" src="/index.tsx"></script>
+</body>
+</html>
+```
+
+### 2. `index.tsx`
+```typescript
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error("Could not find root element to mount to");
+}
+
+const root = createRoot(rootElement);
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+```
+
+### 3. `App.tsx`
+```typescript
+import React, { useState, useCallback, useEffect } from 'react';
+import { Header } from './components/Header';
+import { Hero } from './components/Hero';
+import { Footer } from './components/Footer';
+import { LoginPage } from './components/LoginPage';
+import { TeacherLoginPage } from './components/TeacherLoginPage';
+import { StudentDashboard } from './components/StudentDashboard';
+import { TeacherDashboard } from './components/TeacherDashboard';
+import { SchoolAssistant } from './components/SchoolAssistant'; 
+import { CheckCircle2, X, Bot } from 'lucide-react';
+
+export const SUBJECTS = [
+  "اللغة العربية",
+  "اللغة الإنجليزية",
+  "الرياضيات",
+  "العلوم",
+  "الدراسات الاجتماعية",
+  "التربية الدينية",
+  "الحاسب الآلي",
+  "التربية الفنية"
+] as const;
+
+export const GRADES = [
+  "الاول الإعدادي",
+  "الثاني الإعدادي",
+  "الثالث الإعدادي"
+] as const;
+
+export interface Assessment {
+  id: string;
+  subject: string;
+  title: string;
+  score: number;
+  maxScore: number;
+  status: 'present' | 'absent' | 'excused' | 'late';
+  note?: string;
+  date?: string;
+}
+
+export interface MonthlyExam {
+  id: string;
+  subject: string;
+  score: number;
+  maxScore: number;
+  status: 'present' | 'absent' | 'excused';
+  note?: string;
+  date?: string;
+}
+
+export interface AttendanceRecord {
+  id: string;
+  date: string;
+  status: 'present' | 'absent' | 'late' | 'excused';
+  lessonName?: string;
+  note?: string;
+  lateTime?: string;
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  date: string;
+  author: string;
+  importance: 'normal' | 'high';
+  targetGrade: string;
+}
+
+export interface StudentData {
+  id: string;
+  name: string;
+  grade: string;
+  weeklyAssessments: Assessment[];
+  monthlyExams: MonthlyExam[];
+  attendanceRecords: AttendanceRecord[];
+  announcements: Announcement[];
+}
+
+const generateWeeklyForSubjects = (weeksCount: number): Assessment[] => {
+  const assessments: Assessment[] = [];
+  for (let w = 1; w <= weeksCount; w++) {
+    SUBJECTS.forEach((subj, sIdx) => {
+       assessments.push({
+        id: `w-${w}-${sIdx}`,
+        subject: subj,
+        title: `أسبوع ${w}`,
+        score: 8 + Math.floor(Math.random() * 3),
+        maxScore: 10,
+        status: Math.random() > 0.9 ? 'absent' : 'present',
+        note: '',
+        date: new Date(Date.now() - (10 - w) * 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+       });
+    });
+  }
+  return assessments;
+};
+
+const INITIAL_STUDENTS: StudentData[] = [
+  {
+    id: "12345678901234",
+    name: "أحمد محمد علي",
+    grade: "الاول الإعدادي",
+    weeklyAssessments: generateWeeklyForSubjects(8),
+    monthlyExams: [
+      { id: 'm1', subject: "اللغة العربية", score: 42, maxScore: 50, status: 'present', date: '2023-10-15' },
+      { id: 'm2', subject: "اللغة الإنجليزية", score: 38, maxScore: 40, status: 'present', date: '2023-10-16' },
+      { id: 'm3', subject: "الرياضيات", score: 55, maxScore: 60, status: 'present', date: '2023-10-17' },
+      { id: 'm4', subject: "العلوم", score: 18, maxScore: 20, status: 'present', date: '2023-10-18' },
+    ],
+    attendanceRecords: [
+      { id: 'a1', date: '2023-10-01', status: 'present', lessonName: 'Introduction' },
+      { id: 'a2', date: '2023-10-02', status: 'absent', lessonName: 'Algebra Basics', note: 'مرضي' },
+      { id: 'a3', date: '2023-10-03', status: 'late', lessonName: 'Geometry', lateTime: '08:15' },
+    ],
+    announcements: [
+      { id: 'an1', title: 'موعد رحلة المدرسة', content: 'سيتم تنظيم رحلة إلى المتحف المصري يوم الخميس القادم.', date: '2023-10-20', author: 'أ. محمد', importance: 'normal', targetGrade: 'الكل' },
+      { id: 'an2', title: 'تنبيه هام', content: 'يرجى الالتزام بالزي المدرسي الكامل.', date: '2023-10-18', author: 'إدارة المدرسة', importance: 'high', targetGrade: 'الاول الإعدادي' }
+    ]
+  },
+  {
+    id: "98765432109876",
+    name: "سارة محمود حسن",
+    grade: "الاول الإعدادي",
+    weeklyAssessments: generateWeeklyForSubjects(8),
+    monthlyExams: [
+      { id: 'm5', subject: "اللغة العربية", score: 49, maxScore: 50, status: 'present', date: '2023-10-15' },
+    ],
+    attendanceRecords: [],
+    announcements: []
+  }
+];
+
+const Toast = ({ message, onClose, type = 'success' }: { message: string; onClose: () => void, type?: 'success' | 'info' | 'error' }) => (
+  <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-5 fade-in duration-300 pointer-events-none">
+    <div className={`
+      backdrop-blur-md px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 border pointer-events-auto
+      ${type === 'success' ? 'bg-slate-900 text-white border-slate-700' : 'bg-blue-600 text-white border-blue-500'}
+    `}>
+      <div className="rounded-full p-1 bg-green-500">
+        <CheckCircle2 className="w-3 h-3 text-white" />
+      </div>
+      <span className="font-medium text-sm">{message}</span>
+      <button onClick={onClose} className="opacity-70 hover:opacity-100 ml-2 transition-opacity">
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  </div>
+);
+
+const DynamicBackground = React.memo(() => (
+  <div className="fixed inset-0 -z-50 overflow-hidden pointer-events-none bg-slate-50">
+    <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
+    <div className="absolute top-0 -left-4 w-96 h-96 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob bg-purple-200"></div>
+    <div className="absolute top-0 -right-4 w-96 h-96 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob bg-cyan-200"></div>
+  </div>
+));
+
+export default function App() {
+  const [currentView, setCurrentView] = useState<'landing' | 'login' | 'teacher-login' | 'dashboard' | 'teacher-dashboard'>('landing');
+  const [teacherSubject, setTeacherSubject] = useState<string>('الرياضيات');
+
+  const [history, setHistory] = useState<StudentData[][]>(() => {
+    try {
+        const saved = localStorage.getItem('madrasatuna_data');
+        return saved ? [JSON.parse(saved)] : [INITIAL_STUDENTS];
+    } catch (e) {
+        return [INITIAL_STUDENTS];
+    }
+  });
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const students = history[historyIndex];
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      localStorage.setItem('madrasatuna_data', JSON.stringify(students));
+    }, 1000); 
+    return () => clearTimeout(timeoutId);
+  }, [students]);
+
+  const setStudents = useCallback((newStudentsOrUpdater: StudentData[] | ((prev: StudentData[]) => StudentData[])) => {
+    setHistory(prevHistory => {
+      const current = prevHistory[historyIndex];
+      const newStudents = typeof newStudentsOrUpdater === 'function' 
+        ? newStudentsOrUpdater(current) 
+        : newStudentsOrUpdater;
+      
+      if (JSON.stringify(current) === JSON.stringify(newStudents)) return prevHistory;
+      const newHistory = prevHistory.slice(0, historyIndex + 1);
+      newHistory.push(newStudents);
+      if (newHistory.length > 50) newHistory.shift();
+      return newHistory;
+    });
+    setHistoryIndex(prev => prev + 1 > 50 ? 50 : prev + 1);
+  }, [historyIndex]);
+
+  const undo = useCallback(() => {
+    setHistoryIndex(prev => Math.max(0, prev - 1));
+  }, []);
+
+  const redo = useCallback(() => {
+    setHistoryIndex(prev => Math.min(history.length - 1, prev + 1));
+  }, [history.length]);
+
+  const [currentStudentId, setCurrentStudentId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{msg: string, type?: 'success' | 'info' | 'error'} | null>(null);
+  const [showAiChat, setShowAiChat] = useState(false);
+
+  const triggerToast = (msg: string, type: 'success' | 'info' | 'error' = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleUpdateStudent = useCallback((id: string, data: Partial<StudentData>) => {
+    setStudents(prev => prev.map(s => s.id === id ? { ...s, ...data } : s));
+  }, [setStudents]);
+
+  const handleDeleteStudent = useCallback((id: string) => {
+    setStudents(prev => prev.filter(s => s.id !== id));
+    triggerToast("تم حذف سجل الطالب بنجاح", 'info');
+  }, [setStudents]);
+  
+  const handleBulkUpdate = useCallback((updates: {id: string, data: Partial<StudentData>}[]) => {
+      setStudents(prev => {
+          const map = new Map<string, StudentData>();
+          prev.forEach(s => map.set(s.id, s));
+          updates.forEach(u => {
+              const s = map.get(u.id);
+              if (s) map.set(u.id, { ...s, ...u.data });
+          });
+          return Array.from(map.values());
+      });
+  }, [setStudents]);
+
+  const handleStudentLoginSuccess = (id: string) => {
+    const exists = students.find(s => s.id === id);
+    if (exists) {
+      setCurrentStudentId(id);
+      triggerToast(`مرحباً بك، ${exists.name}!`, 'info');
+    } else {
+      const newStudent: StudentData = {
+        id: id,
+        name: "طالب جديد (تجريبي)",
+        grade: "الاول الإعدادي",
+        weeklyAssessments: generateWeeklyForSubjects(2),
+        monthlyExams: [],
+        attendanceRecords: [],
+        announcements: []
+      };
+      setStudents(prev => [...prev, newStudent]);
+      setCurrentStudentId(id);
+      triggerToast(`مرحباً بك! تم إنشاء ملف جديد.`, 'info');
+    }
+    setCurrentView('dashboard');
+  };
+
+  const handleTeacherLoginSuccess = (selectedSubject: string) => {
+    setTeacherSubject(selectedSubject);
+    setCurrentView('teacher-dashboard');
+    triggerToast(`مرحباً بك يا أستاذ مادة ${selectedSubject}`, 'info');
+  };
+
+  const handleLogout = () => {
+    setCurrentView('landing');
+    setCurrentStudentId(null);
+  };
+
+  const currentStudent = students.find(s => s.id === currentStudentId) || students[0];
+
+  return (
+    <div className="min-h-screen flex flex-col font-sans relative text-slate-900 bg-slate-50">
+      <DynamicBackground />
+      <Header 
+        isLoggedIn={currentView === 'dashboard' || currentView === 'teacher-dashboard'} 
+        onLogout={handleLogout} 
+      />
+      
+      {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+
+      <main className="flex-grow flex flex-col relative">
+        <div className="w-full max-w-[1400px] mx-auto px-4 md:px-6 py-6 md:py-8 flex-grow flex flex-col">
+          {currentView === 'landing' && <Hero onLogin={() => setCurrentView('login')} />}
+          {currentView === 'login' && (
+            <LoginPage 
+              onLoginSuccess={handleStudentLoginSuccess} 
+              onTeacherLoginClick={() => setCurrentView('teacher-login')}
+              onBack={() => setCurrentView('landing')}
+            />
+          )}
+          {currentView === 'teacher-login' && (
+            <TeacherLoginPage 
+              onLoginSuccess={handleTeacherLoginSuccess} 
+              onBackToStudent={() => setCurrentView('login')}
+            />
+          )}
+          {currentView === 'dashboard' && (
+            <StudentDashboard 
+              student={currentStudent} 
+              onLogout={handleLogout} 
+            />
+          )}
+          {currentView === 'teacher-dashboard' && (
+            <TeacherDashboard 
+              students={students} 
+              teacherSubject={teacherSubject}
+              onUpdateStudent={handleUpdateStudent}
+              onBulkUpdate={handleBulkUpdate}
+              onDeleteStudent={handleDeleteStudent}
+              onLogout={handleLogout} 
+              triggerToast={triggerToast}
+              undo={undo}
+              redo={redo}
+              canUndo={historyIndex > 0}
+              canRedo={historyIndex < history.length - 1}
+            />
+          )}
+        </div>
+      </main>
+
+      <div className="fixed bottom-6 right-6 z-[90]">
+        {!showAiChat && (
+          <button 
+            onClick={() => setShowAiChat(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-full shadow-2xl hover:scale-110 transition-all flex items-center justify-center border border-white/15"
+          >
+            <Bot className="w-6 h-6 animate-bounce" />
+          </button>
+        )}
+      </div>
+
+      {showAiChat && (
+        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center sm:justify-end sm:p-6 pointer-events-none">
+          <div className="w-full sm:w-[400px] h-[600px] max-h-[80vh] pointer-events-auto bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+             <div className="bg-slate-50 p-3 border-b border-slate-100 flex justify-between items-center">
+                <span className="font-bold text-slate-700 text-sm flex items-center gap-2">
+                    <Bot className="w-4 h-4 text-blue-600" /> المساعد الذكي
+                </span>
+                <button onClick={() => setShowAiChat(false)} className="p-1 hover:bg-slate-200 rounded-full">
+                    <X className="w-5 h-5 text-slate-500" />
+                </button>
+             </div>
+             <div className="flex-1 overflow-hidden relative">
+                 <SchoolAssistant />
+             </div>
+          </div>
+        </div>
+      )}
+
+      <Footer />
+    </div>
+  );
+}
+```
+
+### 4. `components/Header.tsx`
+```typescript
+import React from 'react';
+import { GraduationCap, LogOut } from 'lucide-react';
+
+interface HeaderProps {
+  isLoggedIn: boolean;
+  onLogout: () => void;
+}
+
+export const Header: React.FC<HeaderProps> = ({ isLoggedIn, onLogout }) => {
+  return (
+    <header className="w-full px-6 py-4 flex items-center justify-between border-b border-slate-100 bg-white/70 backdrop-blur-md sticky top-0 z-50">
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-blue-600 rounded-xl text-white shadow-lg">
+            <GraduationCap className="w-6 h-6" />
+        </div>
+        <span className="text-xl font-bold text-slate-900">بوابة المدرسة</span>
+      </div>
+
+      {isLoggedIn && (
+         <button 
+           onClick={onLogout}
+           className="text-sm font-medium text-red-500 hover:text-red-700 transition-colors flex items-center gap-2"
+         >
+           <LogOut className="w-4 h-4" />
+           <span>تسجيل خروج</span>
+         </button>
+      )}
+    </header>
+  );
+};
+```
+
+### 5. `components/Footer.tsx`
+```typescript
+import React from 'react';
+
+export const Footer: React.FC = () => {
+  return (
+    <footer className="w-full py-8 border-t border-slate-100 mt-auto bg-white">
+      <div className="container mx-auto px-6 text-center text-slate-500 font-medium">
+        <p dir="ltr">Powered by <span className="font-bold text-slate-700">مصنع الرجال</span></p>
+      </div>
+    </footer>
+  );
+};
+```
+
+### 6. `components/Hero.tsx`
+```typescript
+import React from 'react';
+import { Illustration } from './Illustration';
+
+interface HeroProps {
+  onLogin: () => void;
+}
+
+export const Hero: React.FC<HeroProps> = ({ onLogin }) => {
+  return (
+    <div className="flex flex-col-reverse lg:flex-row items-center justify-between gap-12 lg:gap-24 py-12 lg:py-20">
+      <div className="flex-1 text-right max-w-2xl">
+        <h1 className="text-4xl lg:text-6xl font-extrabold text-slate-900 mb-6 leading-tight">
+          منصة مدرستنا <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-cyan-500">الشاملة</span>
+        </h1>
+        <p className="text-lg lg:text-xl text-slate-500 leading-relaxed mb-10 max-w-lg">
+          منصة رسمية لعرض تفاصيل الطلاب وبياناتهم الدراسية باستخدام الرقم القومي بطريقة آمنة ومنظمة.
+        </p>
+        <button 
+          onClick={onLogin}
+          className="bg-slate-900 text-white font-bold py-4 px-10 rounded-2xl shadow-xl hover:bg-slate-800 transition-all text-lg"
+        >
+          الدخول إلى عرض التفاصيل
+        </button>
+      </div>
+      <div className="flex-1 flex justify-center lg:justify-end w-full">
+        <Illustration />
+      </div>
+    </div>
+  );
+};
+```
+
+### 7. `components/Illustration.tsx`
+```typescript
+import React from 'react';
+import { CheckCircle2, TrendingUp, User } from 'lucide-react';
+
+export const Illustration: React.FC = () => {
+  return (
+    <div className="relative w-full max-w-[480px] aspect-square flex items-center justify-center">
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] bg-blue-100/50 rounded-full blur-3xl animate-pulse"></div>
+      
+      <div className="relative z-10 w-full bg-white/80 backdrop-blur-xl border border-white/50 rounded-3xl shadow-2xl p-6 flex flex-col gap-5">
+        <div className="flex items-center gap-4 border-b border-slate-100 pb-4">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-white shadow-lg shadow-blue-200">
+            <User className="w-6 h-6" />
+          </div>
+          <div className="flex-1 space-y-2">
+            <div className="h-3 w-1/3 bg-slate-200 rounded-full"></div>
+            <div className="h-2 w-1/4 bg-slate-100 rounded-full"></div>
+          </div>
+          <div className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-[10px] font-bold flex items-center gap-1">
+            <CheckCircle2 className="w-3 h-3" /> منتظم
+          </div>
+        </div>
+
+        <div className="flex items-end justify-between gap-2 h-32 px-2">
+          {[40, 70, 55, 85, 60, 95].map((h, i) => (
+            <div key={i} className="w-full bg-blue-50 rounded-t-xl relative overflow-hidden h-full">
+               <div className="absolute bottom-0 left-0 w-full bg-blue-500 rounded-t-xl" style={{ height: `${h}%` }}></div>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm">
+             <div className="flex items-center gap-2 mb-2">
+                <div className="p-1.5 bg-purple-100 rounded-lg text-purple-600"><TrendingUp className="w-4 h-4" /></div>
+                <span className="text-[10px] text-slate-400 font-bold">الأداء العام</span>
+             </div>
+             <div className="text-2xl font-black text-slate-800">92%</div>
+          </div>
+          <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm">
+             <div className="flex items-center gap-2 mb-2">
+                <div className="p-1.5 bg-amber-100 rounded-lg text-amber-600"><CheckCircle2 className="w-4 h-4" /></div>
+                <span className="text-[10px] text-slate-400 font-bold">الحضور</span>
+             </div>
+             <div className="text-2xl font-black text-slate-800">28/30</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+```
+
+### 8. `components/LoginPage.tsx`
+```typescript
+import React, { useState } from 'react';
+import { CreditCard, ArrowRight, Loader2, UserCog, ArrowLeft } from 'lucide-react';
+
+interface LoginPageProps {
+  onLoginSuccess: (id: string) => void;
+  onTeacherLoginClick: () => void;
+  onBack?: () => void;
+}
+
+export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onTeacherLoginClick, onBack }) => {
+  const [nationalId, setNationalId] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (nationalId.length === 14) {
+      setIsLoading(true);
+      setTimeout(() => {
+        setIsLoading(false);
+        onLoginSuccess(nationalId);
+      }, 1200);
+    }
+  };
+
+  return (
+    <div className="w-full flex justify-center items-center py-12 relative">
+      <div className="w-full max-w-lg bg-white rounded-3xl shadow-xl border border-slate-100 p-8 md:p-12 relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 to-cyan-400"></div>
+
+        {onBack && (
+            <button 
+                onClick={onBack}
+                className="absolute top-6 left-6 p-2 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+            >
+                <ArrowLeft className="w-5 h-5" />
+            </button>
+        )}
+
+        <div className="text-center mb-10 mt-4">
+          <h2 className="text-3xl font-extrabold text-slate-900 mb-3">تسجيل الدخول</h2>
+          <p className="text-slate-500 text-lg">أدخل الرقم القومي للطالب لعرض التفاصيل الدراسية</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-8">
+          <div className="space-y-2">
+            <div className="relative">
+              <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none">
+                <CreditCard className="h-5 w-5 text-slate-400" />
+              </div>
+              <input
+                type="text"
+                value={nationalId}
+                onChange={(e) => setNationalId(e.target.value.replace(/\D/g, '').slice(0, 14))}
+                placeholder="الرقم القومي (14 رقم)"
+                className="block w-full pr-12 pl-4 py-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-lg font-medium"
+                maxLength={14}
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={isLoading || nationalId.length < 14}
+            className="w-full flex items-center justify-center py-4 px-6 rounded-xl shadow-lg text-lg font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-all"
+          >
+            {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : (
+              <>
+                <span>ابدا رحلتك</span>
+                <ArrowRight className="mr-2 w-5 h-5" />
+              </>
+            )}
+          </button>
+        </form>
+
+        <div className="mt-6 pt-6 border-t border-slate-100 text-center">
+            <button 
+                onClick={onTeacherLoginClick}
+                className="inline-flex items-center gap-2 text-slate-600 hover:text-blue-600 font-medium p-2 rounded-lg hover:bg-blue-50 transition-colors"
+            >
+                <UserCog className="w-5 h-5 text-slate-400" />
+                <span>تسجيل دخول المعلمين</span>
+            </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+```
+
+### 9. `components/TeacherLoginPage.tsx`
+```typescript
+import React, { useState } from 'react';
+import { Mail, Lock, ArrowRight, Loader2, GraduationCap, BookOpen } from 'lucide-react';
+import { SUBJECTS } from '../App';
+
+interface TeacherLoginPageProps {
+  onLoginSuccess: (subject: string) => void;
+  onBackToStudent: () => void;
+}
+
+export const TeacherLoginPage: React.FC<TeacherLoginPageProps> = ({ onLoginSuccess, onBackToStudent }) => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [subject, setSubject] = useState<string>(SUBJECTS[0]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (email && password) {
+      setIsLoading(true);
+      setTimeout(() => {
+        setIsLoading(false);
+        onLoginSuccess(subject);
+      }, 1200);
+    }
+  };
+
+  return (
+    <div className="w-full flex justify-center items-center py-12">
+      <div className="w-full max-w-lg bg-white rounded-3xl shadow-xl border border-slate-100 p-8 md:p-12 relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-purple-600 to-indigo-500"></div>
+
+        <div className="text-center mb-10">
+          <div className="inline-flex items-center justify-center p-3 bg-purple-50 rounded-full mb-4">
+            <GraduationCap className="w-8 h-8 text-purple-600" />
+          </div>
+          <h2 className="text-3xl font-extrabold text-slate-900 mb-3">دخول المعلمين</h2>
+          <p className="text-slate-500 text-lg">أدخل بريدك واجهّز دفتر الرصد</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="البريد الإلكتروني"
+            className="block w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-lg"
+            required
+          />
+
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="كلمة المرور"
+            className="block w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-lg"
+            required
+          />
+
+          <div className="space-y-2">
+             <label className="block text-sm font-bold text-slate-500 mb-1">المادة التي تدرسها</label>
+             <select 
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                className="block w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-lg font-medium cursor-pointer"
+             >
+                 {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+             </select>
+          </div>
+
+          <button
+            type="submit"
+            disabled={isLoading || !email || !password}
+            className="w-full flex items-center justify-center py-4 px-6 rounded-xl shadow-lg text-lg font-bold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50"
+          >
+            {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : (
+              <>
+                <span>تسجيل الدخول</span>
+                <ArrowRight className="mr-2 w-5 h-5" />
+              </>
+            )}
+          </button>
+        </form>
+
+        <div className="mt-8 pt-6 border-t border-slate-100 text-center">
+            <button 
+                onClick={onBackToStudent}
+                className="text-slate-500 hover:text-slate-800 font-medium transition-colors text-sm"
+            >
+                العودة لتسجيل دخول الطلاب
+            </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+```
+
+### 10. `components/StudentDashboard.tsx`
+```typescript
+import React, { useState, useMemo } from 'react';
+import { Calendar, BookOpen, LogOut, TrendingUp, Award, Star, Clock, AlertTriangle, CheckCircle, BarChart3, Layout, Trophy, Crown, Zap, Megaphone, ChevronDown, ChevronUp } from 'lucide-react';
+import type { StudentData, Assessment, MonthlyExam } from '../App';
+import { SUBJECTS } from '../App';
+
+interface StudentDashboardProps {
+  student: StudentData;
+  onLogout: () => void;
+}
+
+export const StudentDashboard: React.FC<StudentDashboardProps> = ({ student, onLogout }) => {
+  const [activeTab, setActiveTab] = useState<'subjects' | 'attendance' | 'analytics' | 'schedule' | 'announcements'>('subjects');
+  const [expandedSubject, setExpandedSubject] = useState<string | null>(null);
+
+  const stats = useMemo(() => {
+    const MAX_ALLOWED_ABSENCE = 30;
+    const absentCount = student.attendanceRecords.filter(r => r.status === 'absent').length;
+    const remainingDays = Math.max(0, MAX_ALLOWED_ABSENCE - absentCount);
+    const absencePercentage = Math.min(100, (absentCount / MAX_ALLOWED_ABSENCE) * 100);
+    
+    let riskLevel: 'safe' | 'warning' | 'critical' = 'safe';
+    if (remainingDays === 0) riskLevel = 'critical';
+    else if (remainingDays <= 7) riskLevel = 'warning';
+
+    const calculatePercentage = (score: number, max: number) => max === 0 ? 0 : (score / max) * 100;
+
+    const presentWeeks = student.weeklyAssessments.filter(w => w.status === 'present');
+    const weeklyAvg = presentWeeks.length > 0 
+      ? Math.round((presentWeeks.reduce((a, b) => a + calculatePercentage(b.score, b.maxScore), 0) / presentWeeks.length)) 
+      : 0;
+
+    const presentExams = student.monthlyExams.filter(e => e.status === 'present');
+    const monthlyAvg = presentExams.length > 0
+      ? Math.round((presentExams.reduce((a, b) => a + calculatePercentage(b.score, b.maxScore), 0) / presentExams.length))
+      : 0;
+
+    return { MAX_ALLOWED_ABSENCE, absentCount, remainingDays, absencePercentage, riskLevel, calculatePercentage, weeklyAvg, monthlyAvg };
+  }, [student]);
+
+  const achievements = useMemo(() => {
+    const list = [];
+    if (stats.absentCount === 0) list.push({ icon: CheckCircle, color: 'text-emerald-500', bg: 'bg-emerald-100', title: 'التزام تام', desc: 'لم تغب أي يوم' });
+    if (stats.weeklyAvg >= 90) list.push({ icon: Crown, color: 'text-amber-500', bg: 'bg-amber-100', title: 'ملك الأسبوع', desc: 'أداء أسبوعي ممتاز' });
+    if (stats.monthlyAvg >= 85) list.push({ icon: Star, color: 'text-violet-500', bg: 'bg-violet-100', title: 'نجم الشهر', desc: 'درجات شهرية عالية' });
+    return list;
+  }, [stats]);
+
+  return (
+    <div className="w-full max-w-6xl mx-auto space-y-8 pb-12">
+      {/* Profile Card */}
+      <div className="relative bg-white rounded-[2.5rem] p-8 md:p-10 shadow-xl border border-slate-100 overflow-hidden">
+        <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-8">
+            <div className="flex items-center gap-6">
+                <div className="relative">
+                    <div className="w-24 h-24 rounded-3xl bg-slate-900 text-white flex items-center justify-center text-4xl font-black shadow-xl">
+                        {student.name.charAt(0)}
+                    </div>
+                    <div className="absolute -bottom-2 -right-2 bg-green-500 border-4 border-white w-6 h-6 rounded-full"></div>
+                </div>
+                <div>
+                    <h1 className="text-3xl md:text-4xl font-black text-slate-800 mb-2">{student.name}</h1>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-bold border border-slate-200">{student.grade}</span>
+                        <span className="px-3 py-1 bg-white text-slate-400 rounded-full text-xs font-mono border border-slate-200">ID: {student.id}</span>
+                    </div>
+                </div>
+            </div>
+
+            {achievements.length > 0 && (
+               <div className="flex gap-2 overflow-x-auto pb-2 lg:pb-0">
+                  {achievements.map((badge, idx) => (
+                    <div key={idx} className={`flex items-center gap-2 px-3 py-2 rounded-xl border border-transparent ${badge.bg} ${badge.color}`}>
+                       <badge.icon className="w-4 h-4" />
+                       <div className="flex flex-col">
+                          <span className="text-[10px] font-black uppercase leading-none mb-0.5">{badge.title}</span>
+                          <span className="text-[9px] opacity-80 leading-none">{badge.desc}</span>
+                       </div>
+                    </div>
+                  ))}
+               </div>
+            )}
+
+            <div className="flex gap-4 md:gap-8 w-full lg:w-auto">
+                <div className="bg-white/50 p-4 rounded-2xl border border-slate-100 min-w-[120px]">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><TrendingUp className="w-3 h-3" /> التقييم</span>
+                    <div className="text-3xl font-black text-slate-800">{Math.max(stats.weeklyAvg, stats.monthlyAvg)}%</div>
+                </div>
+                <div className="bg-white/50 p-4 rounded-2xl border border-slate-100 min-w-[120px]">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> الحضور</span>
+                    <div className="text-3xl font-black text-slate-800">{student.attendanceRecords.filter(r => r.status === 'present').length} يوم</div>
+                </div>
+            </div>
+        </div>
+      </div>
+
+      {/* Navigation Tabs */}
+      <div className="flex justify-center sticky top-24 z-20 py-2">
+        <div className="bg-white/95 p-1.5 rounded-2xl shadow-lg border border-slate-200 inline-flex">
+          {(['subjects', 'attendance', 'analytics', 'schedule', 'announcements'] as const).map((t) => (
+             <button
+                key={t}
+                onClick={() => setActiveTab(t)}
+                className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold transition-all relative ${activeTab === t ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-900'}`}
+             >
+                <span className="flex items-center gap-2">
+                    {t === 'subjects' && <BookOpen className="w-3.5 h-3.5" />}
+                    {t === 'attendance' && <Clock className="w-3.5 h-3.5" />}
+                    {t === 'analytics' && <BarChart3 className="w-3.5 h-3.5" />}
+                    {t === 'schedule' && <Layout className="w-3.5 h-3.5" />}
+                    {t === 'announcements' && <Megaphone className="w-3.5 h-3.5" />}
+                    {t === 'subjects' ? 'المواد الدراسية' : t === 'attendance' ? 'سجل الحضور' : t === 'analytics' ? 'تحليل الأداء' : t === 'announcements' ? 'الإعلانات' : 'الجدول'}
+                </span>
+             </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab Contents */}
+      <div className="min-h-[400px]">
+        {activeTab === 'subjects' && (
+          <div className="space-y-6">
+             {SUBJECTS.map((subject) => {
+                 const subjectWeekly = student.weeklyAssessments.filter(w => w.subject === subject);
+                 const subjectMonthly = student.monthlyExams.filter(m => m.subject === subject);
+                 if (subjectWeekly.length === 0 && subjectMonthly.length === 0) return null;
+                 const isExpanded = expandedSubject === subject;
+
+                 const weeklyScore = subjectWeekly.reduce((acc, curr) => acc + (curr.status === 'present' ? curr.score : 0), 0);
+                 const weeklyMax = subjectWeekly.reduce((acc, curr) => acc + curr.maxScore, 0);
+                 const monthlyScore = subjectMonthly.reduce((acc, curr) => acc + (curr.status === 'present' ? curr.score : 0), 0);
+                 const monthlyMax = subjectMonthly.reduce((acc, curr) => acc + curr.maxScore, 0);
+                 
+                 const totalMax = weeklyMax + monthlyMax;
+                 const totalScore = weeklyScore + monthlyScore;
+                 const percentage = totalMax > 0 ? (totalScore / totalMax) * 100 : 0;
+
+                 return (
+                      <div key={subject} className="bg-white rounded-3xl border border-slate-100 overflow-hidden shadow-sm hover:shadow-md transition-all">
+                        <div className="p-6 cursor-pointer hover:bg-slate-50 transition-colors flex items-center justify-between" onClick={() => setExpandedSubject(isExpanded ? null : subject)}>
+                            <div className="flex items-center gap-4">
+                                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white font-bold shadow-md bg-blue-500`}>
+                                    {percentage.toFixed(0)}%
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-bold text-slate-800">{subject}</h3>
+                                    <p className="text-xs text-slate-500 font-medium">
+                                        {subjectWeekly.length} تقييم أسبوعي • {subjectMonthly.length} امتحان شهري
+                                    </p>
+                                </div>
+                            </div>
+                            <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                        </div>
+
+                        {isExpanded && (
+                            <div className="p-6 pt-0 border-t border-slate-100 bg-slate-50/50">
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-6">
+                                    <div>
+                                        <h4 className="flex items-center gap-2 font-bold text-slate-700 mb-4 text-sm"><Calendar className="w-4 h-4 text-violet-500" /> التقييمات الأسبوعية</h4>
+                                        <div className="space-y-3">
+                                            {subjectWeekly.map(w => (
+                                                <div key={w.id} className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between">
+                                                    <div><span className="text-xs font-bold text-slate-500">{w.title}</span></div>
+                                                    <div><span className="text-xl font-black text-slate-800">{w.score}/{w.maxScore}</span></div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <h4 className="flex items-center gap-2 font-bold text-slate-700 mb-4 text-sm"><Award className="w-4 h-4 text-blue-500" /> الامتحانات الشهرية</h4>
+                                        <div className="space-y-3">
+                                            {subjectMonthly.map(m => (
+                                                <div key={m.id} className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between">
+                                                    <div><span className="text-xs font-bold text-slate-500">امتحان شهري</span></div>
+                                                    <div><span className="text-xl font-black text-slate-800">{m.score}/{m.maxScore}</span></div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                      </div>
+                 );
+             })}
+          </div>
+        )}
+
+        {activeTab === 'attendance' && (
+            <div className="space-y-6">
+                <div className="bg-white rounded-[2rem] p-6 border border-slate-200 shadow-sm relative overflow-hidden">
+                   <div className="flex flex-col md:flex-row items-center justify-between gap-8 relative z-10">
+                      <div>
+                          <h3 className="text-lg font-bold text-slate-800 mb-1">رصيد الغياب المسموح</h3>
+                          <p className="text-sm text-slate-500 max-w-sm">أنت في المنطقة الآمنة. حافظ على حضورك اليومي بانتظام.</p>
+                      </div>
+                      <div className="w-full md:w-1/3 space-y-3">
+                          <div className="flex justify-between items-end">
+                              <span className="text-xs font-bold text-slate-500">الرصيد المتبقي</span>
+                              <span className="text-2xl font-black text-green-600">{stats.remainingDays} يوم متبقي</span>
+                          </div>
+                          <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden">
+                              <div className="h-full rounded-full bg-green-500" style={{ width: `${stats.absencePercentage}%` }}></div>
+                          </div>
+                      </div>
+                   </div>
+                </div>
+
+                <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden">
+                    {student.attendanceRecords.length > 0 ? (
+                        <div className="divide-y divide-slate-100">
+                            {student.attendanceRecords.map(rec => (
+                                <div key={rec.id} className="p-5 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                                    <div className="flex items-center gap-6">
+                                        <div className="font-mono text-slate-400 text-xs bg-white border border-slate-200 px-3 py-2 rounded-xl">{rec.date}</div>
+                                        <div className="font-bold text-slate-700 text-base">{rec.lessonName || 'يوم دراسي رسمي'}</div>
+                                    </div>
+                                    <span className="text-green-600 bg-green-50 px-4 py-1.5 rounded-full text-xs font-bold border border-green-100">{rec.status}</span>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="p-16 text-center text-slate-400 text-sm">سجل الحضور والغياب فارغ حالياً.</div>
+                    )}
+                </div>
+            </div>
+        )}
+
+        {activeTab === 'analytics' && (
+            <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm max-w-xl mx-auto text-center space-y-4">
+                <Trophy className="w-16 h-16 text-yellow-500 mx-auto" />
+                <h3 className="text-xl font-bold">لوحة التحليل والدرجات</h3>
+                <p className="text-slate-500 text-sm">متوسط درجات التقييمات الأسبوعية الحالية: {stats.weeklyAvg}%</p>
+                <p className="text-slate-500 text-sm">متوسط درجات الامتحانات الشهرية الحالية: {stats.monthlyAvg}%</p>
+            </div>
+        )}
+
+        {activeTab === 'schedule' && (
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-right min-w-[600px]">
+                        <thead>
+                            <tr className="bg-slate-50 text-slate-400 text-xs font-bold">
+                                <th className="px-6 py-4">اليوم</th>
+                                <th className="px-6 py-4">الحصة الأولى</th>
+                                <th className="px-6 py-4">الحصة الثانية</th>
+                                <th className="px-6 py-4">الحصة الثالثة</th>
+                                <th className="px-6 py-4">الحصة الرابعة</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {[
+                                { day: 'الأحد', c1: 'لغة عربية', c2: 'رياضيات', c3: 'لغة إنجليزية', c4: 'علوم' },
+                                { day: 'الأثنين', c1: 'دراسات', c2: 'لغة عربية', c3: 'رياضيات', c4: 'حاسب آلي' },
+                                { day: 'الثلاثاء', c1: 'لغة إنجليزية', c2: 'علوم', c3: 'لغة عربية', c4: 'دين' },
+                            ].map((row, i) => (
+                                <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                    <td className="px-6 py-4 font-bold text-slate-700">{row.day}</td>
+                                    <td className="px-6 py-4 text-sm text-slate-600">{row.c1}</td>
+                                    <td className="px-6 py-4 text-sm text-slate-600">{row.c2}</td>
+                                    <td className="px-6 py-4 text-sm text-slate-600">{row.c3}</td>
+                                    <td className="px-6 py-4 text-sm text-slate-600">{row.c4}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        )}
+
+        {activeTab === 'announcements' && (
+             <div className="space-y-4">
+                 {student.announcements && student.announcements.length > 0 ? (
+                     student.announcements.map(announcement => (
+                         <div key={announcement.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                             <div className="flex justify-between mb-3">
+                                 <h3 className="text-lg font-black text-slate-800">{announcement.title}</h3>
+                                 <span className="text-[10px] bg-slate-100 px-2.5 py-1.5 rounded-lg font-mono">{announcement.date}</span>
+                             </div>
+                             <p className="text-slate-600 text-sm leading-relaxed mb-4">{announcement.content}</p>
+                             <div className="text-xs font-bold text-slate-400">{announcement.author}</div>
+                         </div>
+                     ))
+                 ) : (
+                     <div className="text-center py-12 text-slate-400 text-sm">لا توجد إعلانات نشطة حالياً.</div>
+                 )}
+             </div>
+        )}
+      </div>
+
+      <div className="flex justify-center pt-8">
+        <button onClick={onLogout} className="text-slate-400 hover:text-red-500 transition-colors flex items-center gap-2 text-xs font-bold px-6 py-3 hover:bg-red-50 rounded-xl">
+          <LogOut className="w-4 h-4" />
+          تسجيل الخروج من البوابة
+        </button>
+      </div>
+    </div>
+  );
+};
+```
+
+### 11. `components/SchoolAssistant.tsx`
+```typescript
+import React, { useState, useRef, useEffect } from 'react';
+import { Send, Bot, User, Sparkles } from 'lucide-react';
+import { GoogleGenAI } from "@google/genai";
+
+interface Message {
+  id: string;
+  sender: 'ai' | 'user';
+  text: string;
+}
+
+export const SchoolAssistant: React.FC = () => {
+  const [messages, setMessages] = useState<Message[]>([
+    { id: '1', sender: 'ai', text: 'مرحباً! أنا مساعدك المدرسي الذكي. كيف يمكنني مساعدتك في دراستك اليوم؟' }
+  ]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return;
+    const userMsg = input;
+    setInput('');
+    setMessages(prev => [...prev, { id: Date.now().toString(), sender: 'user', text: userMsg }]);
+    setIsLoading(true);
+
+    try {
+      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "AIzaSyCiT03vdld6TbFplPmh9FfIkPkGXvmDiYw";
+      const ai = new GoogleGenAI({ apiKey });
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: userMsg,
+        config: {
+          systemInstruction: "أنت مساعد مدرسي ذكي ولطيف، ساعد الطلاب في الإجابة على تساؤلاتهم المدرسية والواجبات وشرح المواد الدراسية بأسلوب ممتع وبسيط ومناسب لطلاب المدارس الإعدادية باللغة العربية الفصحى."
+        }
+      });
+
+      const aiText = response.text || "عذراً، لم أستطع توليد إجابة مناسبة حالياً.";
+      setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), sender: 'ai', text: aiText }]);
+    } catch (error) {
+      setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), sender: 'ai', text: 'عذراً، حدث خطأ أثناء الاتصال بالخادم الذكي.' }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-slate-50">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.map((m) => (
+          <div key={m.id} className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`flex items-start gap-2 max-w-[80%] ${m.sender === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+              <div className={`p-2 rounded-xl ${m.sender === 'user' ? 'bg-blue-600 text-white' : 'bg-white text-slate-800 shadow-sm border border-slate-100'}`}>
+                {m.sender === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4 text-blue-500" />}
+              </div>
+              <div className={`p-3 rounded-2xl text-sm leading-relaxed ${m.sender === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white text-slate-800 rounded-tl-none shadow-sm border border-slate-100'}`}>
+                {m.text}
+              </div>
+            </div>
+          </div>
+        ))}
+        {isLoading && (
+          <div className="flex justify-start">
+            <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-blue-500 animate-spin" />
+              <span className="text-xs text-slate-400">جاري التفكير والكتابة...</span>
+            </div>
+          </div>
+        )}
+        <div ref={chatEndRef} />
+      </div>
+
+      <div className="p-3 bg-white border-t border-slate-100 flex gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+          placeholder="اسأل المساعد الذكي عن أي واجب أو تمرين..."
+          className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+        />
+        <button 
+          onClick={handleSend}
+          className="p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors"
+        >
+          <Send className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+};
+```
